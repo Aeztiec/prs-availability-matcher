@@ -1,0 +1,51 @@
+name: Refresh availability data
+
+# Re-reads the World Cup spreadsheet and commits docs/data.js if anything
+# changed. GitHub Pages redeploys automatically on the commit, so the site
+# stays current without anything running between builds.
+
+on:
+  schedule:
+    # Every hour, on the hour (UTC). GitHub queues these on a best-effort
+    # basis, so an occasional run can be a few minutes late or skipped.
+    - cron: "0 * * * *"
+  workflow_dispatch:  # lets you refresh on demand from the Actions tab
+  push:
+    branches: [main]
+    paths:
+      - "availability.py"
+      - "build_data.py"
+      - ".github/workflows/refresh.yml"
+      - "timings/**"   # a new competition dropped in
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Rebuild docs/data.js (re-downloading published sheets)
+        run: python build_data.py --refresh
+
+      - name: Commit if the availability changed
+        run: |
+          if git diff --quiet -- docs/data.js; then
+            echo "No change in the sheet - nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data.js
+          git commit -m "Refresh availability data"
+          git push

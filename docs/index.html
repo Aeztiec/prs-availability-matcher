@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Availability Matcher</title>
+<meta name="description" content="Find the kickoff times two teams are both available for.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Quantico:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --panel: #141414;
+    --line: #2a2a2a;
+    --ink: #ffffff;
+    --muted: #8a8a8a;
+    --green: #00ff00;
+    --red: #ff0000;
+    --font: Quantico, "Trebbuchet MS", "Segoe UI", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 1.5rem 1rem 4rem;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.45;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .wrap { max-width: 46rem; margin: 0 auto; }
+
+  header { border-bottom: 1px solid var(--line); padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .35rem; letter-spacing: .02em; }
+  .sub { color: var(--muted); font-size: .8rem; margin: 0; }
+  .sub a { color: var(--muted); }
+  a { color: var(--green); }
+
+  /* ---- pickers ---- */
+  .pickers { display: grid; grid-template-columns: 1fr auto 1fr; gap: .75rem; align-items: end; }
+  label { display: block; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: .35rem; }
+
+  select {
+    width: 100%;
+    padding: .7rem .6rem;
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: var(--font);
+    font-size: 1rem;
+  }
+  select:focus-visible, button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+  #swap {
+    padding: .7rem .8rem;
+    background: var(--panel);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: var(--font);
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  #swap:hover { color: var(--ink); border-color: var(--muted); }
+
+  .comp { margin-bottom: 1.1rem; }
+  .comp select { max-width: 22rem; }
+
+  /* ---- results ---- */
+  #out { margin-top: 2rem; }
+
+  .day { margin-bottom: 1.75rem; }
+  .day h2 {
+    font-size: .78rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--green); margin: 0 0 .6rem; font-weight: 700;
+  }
+  .day.low h2 { color: var(--muted); }
+  .day.low h2::after { content: " · low priority"; letter-spacing: .06em; }
+
+  .window {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--green);
+    border-radius: 4px;
+    background: var(--panel);
+    padding: .7rem .85rem;
+    margin-bottom: .5rem;
+  }
+  .day.low .window { border-left-color: var(--muted); }
+
+  .primary { font-size: 1.15rem; font-weight: 700; }
+  .primary .tz { font-size: .72rem; color: var(--muted); font-weight: 400; margin-left: .4rem; letter-spacing: .08em; }
+  .alts { color: var(--muted); font-size: .78rem; margin-top: .2rem; }
+  .alts span { white-space: nowrap; }
+  .alts span + span::before { content: " · "; }
+
+  .total { color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line); padding-top: .9rem; }
+
+  .note { border: 1px solid var(--line); border-radius: 4px; padding: 1rem; color: var(--muted); }
+  .note strong { color: var(--ink); font-weight: 700; }
+  .note.bad { border-left: 3px solid var(--red); }
+
+  .hint { color: var(--muted); font-size: .85rem; }
+
+  /* ---- discord message ---- */
+  #discord { margin-top: 2.25rem; border-top: 1px solid var(--line); padding-top: 1.5rem; }
+  #discord h2 {
+    font-size: .78rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 .9rem; font-weight: 700;
+  }
+
+  .weekend { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; margin-bottom: .9rem; }
+  .weekend label { margin: 0; }
+  input[type="date"] {
+    padding: .45rem .55rem;
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: var(--font);
+    font-size: .9rem;
+    color-scheme: dark;
+  }
+  input[type="date"]:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+  .warn { color: var(--red); font-size: .78rem; margin: 0; }
+
+  #msg {
+    width: 100%;
+    min-height: 11rem;
+    padding: .8rem;
+    background: #000;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .82rem;
+    line-height: 1.6;
+    resize: vertical;
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+  }
+  #msg:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+  #copy {
+    margin-top: .6rem;
+    padding: .65rem 1.1rem;
+    background: var(--green);
+    color: #000;
+    border: 1px solid var(--green);
+    border-radius: 4px;
+    font-family: var(--font);
+    font-size: .9rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    cursor: pointer;
+  }
+  #copy:hover { filter: brightness(1.15); }
+  #copy.done { background: var(--panel); color: var(--green); }
+
+  @media (max-width: 30rem) {
+    .pickers { grid-template-columns: 1fr; }
+    #swap { width: 100%; }
+    .alts span { display: block; }
+    .alts span + span::before { content: ""; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1 id="heading">Availability Matcher</h1>
+    <p class="sub">
+      Kickoff times both teams are available for from the
+      <a id="src" href="#" target="_blank" rel="noopener">availability sheet</a>.
+      Checked hourly; last changed <span id="stamp">—</span>.
+    </p>
+  </header>
+
+  <div class="comp" id="comp-wrap" hidden>
+    <label for="comp">Competition</label>
+    <select id="comp"></select>
+  </div>
+
+  <div class="pickers">
+    <div>
+      <label for="a">Team 1</label>
+      <select id="a"></select>
+    </div>
+    <button id="swap" type="button" title="Swap the two teams" aria-label="Swap the two teams">⇄</button>
+    <div>
+      <label for="b">Team 2</label>
+      <select id="b"></select>
+    </div>
+  </div>
+
+  <div id="out"></div>
+
+  <section id="discord" hidden>
+    <h2>Discord message</h2>
+    <div class="weekend">
+      <label for="weekend">Saturday of the match weekend</label>
+      <input type="date" id="weekend">
+    </div>
+    <p class="warn" id="weekend-warn" hidden></p>
+    <textarea id="msg" spellcheck="false" aria-label="Discord message to copy"></textarea>
+    <div><button id="copy" type="button">Copy for Discord</button></div>
+    <p class="hint">
+      Paste straight into Discord. The <code>&lt;t:…&gt;</code> timestamps render
+      in each reader's own timezone, so nobody has to convert anything.
+    </p>
+  </section>
+
+</div>
+
+<script src="./data.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var root = window.AVAILABILITY_DATA;
+  var out = document.getElementById("out");
+  var selA = document.getElementById("a");
+  var selB = document.getElementById("b");
+  var selComp = document.getElementById("comp");
+  var compWrap = document.getElementById("comp-wrap");
+
+  if (!root || !root.competitions || !root.competitions.length) {
+    out.innerHTML = "<div class=\"note bad\">Couldn't load the availability data " +
+      "(<code>data.js</code> is missing or empty). If you're opening this from a " +
+      "checkout, run <strong>python build_data.py</strong> first.</div>";
+    selA.disabled = selB.disabled = true;
+    return;
+  }
+
+  // The competition currently on screen. Everything below reads this, so
+  // switching competition is just a matter of pointing it somewhere else.
+  var data = root.competitions[0];
+  for (var d = 0; d < root.competitions.length; d++) {
+    if (root.competitions[d].key === root.default) data = root.competitions[d];
+  }
+
+  function hasSubmitted(team) {
+    return team.slots.indexOf("G") !== -1 || team.slots.indexOf("R") !== -1;
+  }
+
+  // ---- last-updated stamp (shared by every competition) ----
+  var src = document.getElementById("src");
+  var stamp = document.getElementById("stamp");
+  if (root.generated) {
+    var when = new Date(root.generated);
+    stamp.textContent = isNaN(when) ? root.generated : when.toLocaleString(undefined, {
+      dateStyle: "medium", timeStyle: "short"
+    });
+    stamp.title = root.generated;
+  }
+
+  // ---- competition picker (only worth showing when there's a choice) ----
+  root.competitions.forEach(function (competition) {
+    var option = document.createElement("option");
+    option.value = competition.key;
+    option.textContent = [competition.season, competition.competition]
+      .filter(Boolean).join(" ") || competition.key;
+    selComp.appendChild(option);
+  });
+  compWrap.hidden = root.competitions.length < 2;
+
+  function fillTeams() {
+    [selA, selB].forEach(function (select) {
+      select.innerHTML = '<option value="">Pick a team…</option>';
+    });
+    data.teams.forEach(function (team, index) {
+      [selA, selB].forEach(function (select) {
+        var option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = team.country + " (" + team.player + ")";
+        select.appendChild(option);
+      });
+    });
+    selA.value = "";
+    selB.value = "";
+  }
+
+  function useCompetition(key) {
+    for (var i = 0; i < root.competitions.length; i++) {
+      if (root.competitions[i].key === key) {
+        data = root.competitions[i];
+        break;
+      }
+    }
+    selComp.value = data.key;
+    document.getElementById("heading").textContent = data.title;
+    document.title = data.title;
+    if (data.source) {
+      src.href = data.source;
+      src.removeAttribute("aria-disabled");
+    } else {
+      // Saved by hand rather than pulled from a published sheet.
+      src.removeAttribute("href");
+    }
+    fillTeams();
+  }
+
+  // ---- matching ----
+  function overlapWindows(teamA, teamB) {
+    var windows = [];
+    var previous = -2;
+    var previousDay = -1;
+    data.slots.forEach(function (slot, index) {
+      if (teamA.slots[index] !== "G" || teamB.slots[index] !== "G") return;
+      if (index === previous + 1 && slot.day === previousDay) {
+        windows[windows.length - 1].push(index);
+      } else {
+        windows.push([index]);
+      }
+      previous = index;
+      previousDay = slot.day;
+    });
+    return windows;
+  }
+
+  // A window runs from its first kickoff time to its last. The end is the
+  // latest time they can start, not the end of play.
+  function span(indices, zone) {
+    var first = data.slots[indices[0]][zone];
+    var last = data.slots[indices[indices.length - 1]][zone];
+    return first === last ? first : first + " – " + last;
+  }
+
+  function plural(n, word) {
+    return n + " " + word + (n === 1 ? "" : "s");
+  }
+
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function render() {
+    var a = selA.value === "" ? null : data.teams[+selA.value];
+    var b = selB.value === "" ? null : data.teams[+selB.value];
+
+    if (!a || !b) {
+      out.innerHTML = '<p class="hint">Pick two teams to see when they can both play.</p>';
+      updateDiscord(a, b, null);
+      return;
+    }
+    if (a === b) {
+      out.innerHTML = '<div class="note">Those are the same team.</div>';
+      updateDiscord(a, b, null);
+      return;
+    }
+
+    var missing = [a, b].filter(function (team) { return !hasSubmitted(team); });
+    if (missing.length) {
+      out.innerHTML = '<div class="note bad">' + missing.map(function (team) {
+        return "<strong>" + escapeHtml(team.country) + "</strong> (" +
+          escapeHtml(team.player) + ") hasn\'t filled in any availability yet.";
+      }).join("<br>") + "</div>";
+      updateDiscord(a, b, null);
+      return;
+    }
+
+    var windows = overlapWindows(a, b);
+    if (!windows.length) {
+      out.innerHTML = '<div class="note bad">No overlapping times — ' +
+        '<strong>' + escapeHtml(a.country) + '</strong> and ' +
+        '<strong>' + escapeHtml(b.country) + '</strong> are never free at the same time.</div>';
+      updateDiscord(a, b, null);
+      return;
+    }
+
+    var html = "";
+    data.days.forEach(function (dayName, dayIndex) {
+      var dayWindows = windows.filter(function (w) { return data.slots[w[0]].day === dayIndex; });
+      if (!dayWindows.length) return;
+
+      var low = /low priority/i.test(dayName);
+      html += '<section class="day' + (low ? " low" : "") + '">';
+      html += "<h2>" + escapeHtml(dayName.replace(/\s*\(low priority\)/i, "")) + "</h2>";
+      dayWindows.forEach(function (w) {
+        html += '<div class="window">' +
+          '<div class="primary">' + escapeHtml(span(w, "utc")) +
+            '<span class="tz">GMT+0</span></div>' +
+          '<div class="alts">' +
+            "<span>" + escapeHtml(span(w, "est")) + " EST</span>" +
+            "<span>" + escapeHtml(span(w, "bst")) + " BST</span>" +
+            "<span>" + plural(w.length, "kickoff") + "</span>" +
+          "</div>" +
+        "</div>";
+      });
+      html += "</section>";
+    });
+
+    var total = windows.reduce(function (sum, w) { return sum + w.length; }, 0);
+    html += '<p class="total">' + plural(windows.length, "window") + ", " +
+      plural(total, "possible kickoff time") + " in total. " +
+      "Each end time is the latest they can start, not the end of play.</p>";
+
+    out.innerHTML = html;
+    updateDiscord(a, b, windows);
+  }
+
+  // ---- discord message ----
+  // The sheet has weekday names and clock times but no dates, and a Discord
+  // timestamp needs a real epoch. So everything is anchored to one Saturday:
+  // Friday is the day before it and Sunday the day after, which keeps the
+  // three days in the same weekend instead of drifting into different weeks.
+  var DAY_OFFSET = { friday: -1, saturday: 0, sunday: 1 };
+  var section = document.getElementById("discord");
+  var weekendInput = document.getElementById("weekend");
+  var weekendWarn = document.getElementById("weekend-warn");
+  var msg = document.getElementById("msg");
+  var copyButton = document.getElementById("copy");
+
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+  function isoDate(date) {
+    return date.getUTCFullYear() + "-" + pad(date.getUTCMonth() + 1) + "-" +
+      pad(date.getUTCDate());
+  }
+
+  function nextSaturday() {
+    var now = new Date();
+    var date = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    date.setUTCDate(date.getUTCDate() + ((6 - date.getUTCDay() + 7) % 7));
+    return date;
+  }
+
+  function anchorDate() {
+    var parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(weekendInput.value || "");
+    if (!parts) return nextSaturday();
+    return new Date(Date.UTC(+parts[1], +parts[2] - 1, +parts[3]));
+  }
+
+  // The sheet's GMT+0 column is a fixed offset, so it maps straight to UTC.
+  function epochFor(anchor, dayName, clock) {
+    var time = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(clock);
+    if (!time) return null;
+    var hour = +time[1] % 12 + (time[3].toUpperCase() === "PM" ? 12 : 0);
+    var key = (dayName.match(/friday|saturday|sunday/i) || [""])[0].toLowerCase();
+    var offset = Object.prototype.hasOwnProperty.call(DAY_OFFSET, key) ? DAY_OFFSET[key] : 0;
+    return Date.UTC(
+      anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate() + offset,
+      hour, +time[2]
+    ) / 1000;
+  }
+
+  function buildMessage(a, b, windows) {
+    var anchor = anchorDate();
+    var lines = [
+      "# " + a.country + " (" + a.player + ")  vs  " + b.country + " (" + b.player + ")",
+      "Times you're both free:",
+      ""
+    ];
+
+    data.days.forEach(function (dayName, dayIndex) {
+      var dayWindows = windows.filter(function (w) {
+        return data.slots[w[0]].day === dayIndex;
+      });
+      if (!dayWindows.length) return;
+
+      lines.push("**" + dayName.replace(/\s*\(low priority\)/i, "") + "**");
+      dayWindows.forEach(function (w) {
+        var from = epochFor(anchor, dayName, data.slots[w[0]].utc);
+        var to = epochFor(anchor, dayName, data.slots[w[w.length - 1]].utc);
+        if (from === null || to === null) return;
+        lines.push(from === to
+          ? "<t:" + from + ":F>"
+          : "<t:" + from + ":F>  →  <t:" + to + ":t>");
+      });
+      lines.push("");
+    });
+
+    lines.push("-# Times show in your own timezone.");
+    lines.push("-# The second time is the latest you can kick off, not the end of the match.");
+    return lines.join("\n");
+  }
+
+  function updateDiscord(a, b, windows) {
+    if (!a || !b || a === b || !windows || !windows.length) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+
+    var anchor = anchorDate();
+    var wrongDay = anchor.getUTCDay() !== 6;
+    weekendWarn.hidden = !wrongDay;
+    if (wrongDay) {
+      weekendWarn.textContent = "That date is a " +
+        ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][anchor.getUTCDay()] +
+        ", not a Saturday — the Friday and Sunday times are placed either side of it.";
+    }
+
+    msg.value = buildMessage(a, b, windows);
+    msg.rows = msg.value.split("\n").length + 1;
+    copyButton.classList.remove("done");
+    copyButton.textContent = "Copy for Discord";
+  }
+
+  var copyReset;
+
+  function flash(text) {
+    copyButton.classList.add("done");
+    copyButton.textContent = text;
+    clearTimeout(copyReset);
+    copyReset = setTimeout(function () {
+      copyButton.classList.remove("done");
+      copyButton.textContent = "Copy for Discord";
+    }, 2500);
+  }
+
+  function copyMessage() {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(msg.value).then(function () {
+        flash("Copied ✓");
+      }, selectInstead);
+    } else {
+      selectInstead();
+    }
+  }
+
+  // If the clipboard API is unavailable or refused (an insecure origin, or a
+  // browser that wants a stronger user gesture), select the text and say so -
+  // one keystroke away, and never a blocking prompt() dialog.
+  function selectInstead() {
+    msg.focus();
+    msg.select();
+    var copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch (error) {
+      copied = false;
+    }
+    flash(copied ? "Copied ✓" : "Selected — press Ctrl+C");
+  }
+
+  weekendInput.value = isoDate(nextSaturday());
+  weekendInput.addEventListener("change", function () { render(); });
+  copyButton.addEventListener("click", copyMessage);
+
+  // ---- shareable URLs ----
+  function findTeam(name) {
+    if (!name) return "";
+    var needle = String(name).toLowerCase();
+    for (var i = 0; i < data.teams.length; i++) {
+      if (data.teams[i].country.toLowerCase() === needle ||
+          data.teams[i].player.toLowerCase() === needle) return String(i);
+    }
+    return "";
+  }
+
+  function readUrl() {
+    var params = new URLSearchParams(location.search);
+    // Competition first - it decides which teams the names resolve against.
+    useCompetition(params.get("c") || root.default || root.competitions[0].key);
+    selA.value = findTeam(params.get("a"));
+    selB.value = findTeam(params.get("b"));
+    render();
+  }
+
+  function writeUrl() {
+    var params = new URLSearchParams();
+    if (root.competitions.length > 1) params.set("c", data.key);
+    if (selA.value !== "") params.set("a", data.teams[+selA.value].country);
+    if (selB.value !== "") params.set("b", data.teams[+selB.value].country);
+    var query = params.toString();
+    history.replaceState(null, "", query ? "?" + query : location.pathname);
+  }
+
+  function onChange() {
+    render();
+    writeUrl();
+  }
+
+  selComp.addEventListener("change", function () {
+    useCompetition(selComp.value);  // clears both teams - they differ per competition
+    onChange();
+  });
+  selA.addEventListener("change", onChange);
+  selB.addEventListener("change", onChange);
+  document.getElementById("swap").addEventListener("click", function () {
+    var held = selA.value;
+    selA.value = selB.value;
+    selB.value = held;
+    onChange();
+  });
+  window.addEventListener("popstate", readUrl);
+
+  readUrl();
+})();
+</script>
+</body>
+</html>
