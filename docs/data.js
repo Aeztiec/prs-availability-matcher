@@ -252,7 +252,7 @@ window.AVAILABILITY_DATA = {
    ],
    "teams": [
     {
-     "country": "SPAIN",
+     "country": "SPAIN_STALE_TEST",
      "player": "j5mes",
      "slots": "---------------------------------------"
     },
