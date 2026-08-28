@@ -80,6 +80,9 @@
     font-size: .78rem; letter-spacing: .14em; text-transform: uppercase;
     color: var(--green); margin: 0 0 .6rem; font-weight: 700;
   }
+  .day.low h2 { color: var(--muted); }
+  .day.low h2::after { content: " · low priority"; letter-spacing: .06em; }
+
   .window {
     border: 1px solid var(--line);
     border-left: 3px solid var(--green);
@@ -88,6 +91,8 @@
     padding: .7rem .85rem;
     margin-bottom: .5rem;
   }
+  .day.low .window { border-left-color: var(--muted); }
+
   .primary { font-size: 1.15rem; font-weight: 700; }
   .primary .tz { font-size: .72rem; color: var(--muted); font-weight: 400; margin-left: .4rem; letter-spacing: .08em; }
   .alts { color: var(--muted); font-size: .78rem; margin-top: .2rem; }
@@ -377,7 +382,8 @@
       var dayWindows = windows.filter(function (w) { return data.slots[w[0]].day === dayIndex; });
       if (!dayWindows.length) return;
 
-      html += '<section class="day">';
+      var low = /low priority/i.test(dayName);
+      html += '<section class="day' + (low ? " low" : "") + '">';
       html += "<h2>" + escapeHtml(dayName.replace(/\s*\(low priority\)/i, "")) + "</h2>";
       dayWindows.forEach(function (w) {
         html += '<div class="window">' +
