@@ -20,14 +20,17 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
+import re
 import sys
 
 import availability as av
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUTPUT = os.path.join(HERE, "docs", "data.js")
+PAGE = os.path.join(HERE, "docs", "index.html")
 
 # One character per kickoff column, per team.
 FREE, BUSY, BLANK = "G", "R", "-"
@@ -121,6 +124,31 @@ def unchanged(new, old):
            {k: v for k, v in old.items() if k != "generated"}
 
 
+def stamp_page(digest, path=PAGE):
+    """Point index.html at data.js?v=<digest>.
+
+    GitHub Pages serves everything with Cache-Control: max-age=600 and caches
+    the page and the data file independently, so without this a freshly
+    fetched index.html can still pair with a stale cached data.js. Versioning
+    the URL means a new page always pulls the data that goes with it.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            page = handle.read()
+    except OSError:
+        return False
+    updated = re.sub(
+        r'src="\./data\.js(?:\?v=[^"]*)?"',
+        'src="./data.js?v={}"'.format(digest),
+        page,
+    )
+    if updated == page:
+        return False
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(updated)
+    return True
+
+
 def write(payload, path=OUTPUT):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     body = json.dumps(payload, indent=1, ensure_ascii=False)
@@ -129,6 +157,7 @@ def write(payload, path=OUTPUT):
         handle.write("window.AVAILABILITY_DATA = ")
         handle.write(body)
         handle.write(";\n")
+    stamp_page(hashlib.sha256(body.encode("utf-8")).hexdigest()[:8])
     return path
 
 
