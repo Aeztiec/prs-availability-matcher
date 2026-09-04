@@ -47,6 +47,11 @@ SOURCES = {
         "1FsD13VXF5LZ2Hvy5lkFFNjyvOS1GoIDHssR__idkqD8/htmlview/sheet"
         "?headers=true&gid=876736309"
     ),
+    "S17_Clubs": (
+        "https://docs.google.com/spreadsheets/u/0/d/"
+        "1dGGS_z2MFdzacEXe-k-QIIA-fZpLIrK2xtSP6L9N-z8/htmlview/sheet"
+        "?headers=true&gid=876736309"
+    ),
 }
 
 GREEN = "#00ff00"
