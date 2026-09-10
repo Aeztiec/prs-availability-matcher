@@ -17,7 +17,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-from . import config, notify, referees
+from . import config, notify, referees, season
 from .db import OFFER_ACCEPTED, OFFER_DECLINED, Store
 from .ref_views import REF_DYNAMIC_ITEMS, offer_view
 from .fallback import Timings
@@ -27,7 +27,9 @@ from .selector import fits_on_one_message, SelectorState
 from .views import (
     DYNAMIC_ITEMS, SCOPE_FIXTURE, SCOPE_REF_WEEK, Target, opener, open_selector,
 )
-from .weeks import from_iso, parse_deadline, to_iso, utcnow, week_of
+from .weeks import (
+    from_iso, parse_deadline, slot_datetime, to_iso, utcnow, week_of,
+)
 
 log = logging.getLogger("prsbot")
 
@@ -173,6 +175,86 @@ class PRSBot(discord.Client):
                             str(candidate.referee_id))
         return None
 
+    # -------------------------------------------------------------- gameweeks
+    def open_gameweeks(self, now=None):
+        """Gameweeks a manager may set availability for.
+
+        Always the current one, plus any staff have opened early. A manager
+        cannot sensibly say in September whether their squad is free in
+        December, so the season is not opened all at once.
+        """
+        now = now or utcnow()
+        here = season.current(now)
+        keys = self.store.opened_gameweeks()
+        if here:
+            keys = keys | {here.key}
+        return [gw for gw in season.ALL if gw.key in keys]
+
+    def my_open_fixtures(self, user_id, now=None):
+        """This manager's unscheduled fixtures in currently open gameweeks."""
+        allowed = {gw.key for gw in self.open_gameweeks(now)}
+        return [
+            f for f in self.store.fixtures()
+            if user_id in (f["home_manager_id"], f["away_manager_id"])
+            and not f["slot_key"]
+            and (f["gameweek"] is None or f["gameweek"] in allowed)
+        ]
+
+    def offerable_slots(self, gameweek_key=None):
+        """Slots legal for a gameweek, honouring the season's kickoff floor.
+
+        Without this an early gameweek could offer a time before the season
+        opens, and the bot would happily schedule an illegal fixture.
+        """
+        if not gameweek_key:
+            return self.slots
+        try:
+            gw = season.gameweek(gameweek_key)
+        except LookupError:
+            return self.slots
+        return [
+            slot for slot in self.slots
+            if slot_datetime(gw.week, slot) >= season.KICKOFF_FLOOR
+        ]
+
+    async def create_gameweek_fixtures(self, gw, manager_of, opened_by=None):
+        """Create every fixture in a gameweek and DM both managers.
+
+        Idempotent: a pairing that already exists is skipped, so running this
+        twice does not duplicate fixtures or spam twenty people again.
+        """
+        made, skipped, unreachable = [], [], []
+        for home_code, away_code, league in gw.fixtures:
+            home = season.team_name(home_code)
+            away = season.team_name(away_code)
+            if self.store.fixture_for(gw.key, home, away):
+                skipped.append("{} v {}".format(home_code, away_code))
+                continue
+            home_id = manager_of.get(home)
+            away_id = manager_of.get(away)
+            if not home_id or not away_id:
+                skipped.append("{} v {} (no Discord id for a manager)".format(
+                    home_code, away_code))
+                continue
+            fixture_id = self.store.create_fixture(
+                self.timings.competition.key, gw.week, home, away,
+                home_id, away_id, to_iso(gw.deadline),
+                Status.WAITING_FOR_AVAILABILITY, gameweek=gw.key,
+            )
+            self.store.note(fixture_id, "gameweek opened",
+                            "{} ({}) by {}".format(gw.key, league, opened_by))
+            fixture = self.store.fixture(fixture_id)
+            made.append(fixture_id)
+            for manager_id in (home_id, away_id):
+                sent = await self.dm(
+                    manager_id, notify.ask_for_availability(fixture, to_iso(gw.deadline)),
+                    view=opener(Target(SCOPE_FIXTURE, fixture_id)),
+                )
+                if not sent:
+                    unreachable.append(manager_id)
+                    self.store.note(fixture_id, "could not DM", str(manager_id))
+        return made, skipped, unreachable
+
     # ---------------------------------------------------------- fixture board
     def board_bodies(self, week):
         names = {r["discord_id"]: r["name"] for r in self.store.referees(active_only=False)}
@@ -297,16 +379,16 @@ def register(bot):
     @tree.command(description="Set your availability for a fixture")
     @app_commands.describe(fixture="Fixture number, if you have more than one")
     async def availability(interaction, fixture: int = None):
-        mine = [
-            f for f in store.fixtures()
-            if interaction.user.id in (f["home_manager_id"], f["away_manager_id"])
-            and not f["slot_key"]
-        ]
+        mine = bot.my_open_fixtures(interaction.user.id)
         if fixture is not None:
             mine = [f for f in mine if f["id"] == fixture]
         if not mine:
+            open_now = ", ".join(gw.key for gw in bot.open_gameweeks()) or "none"
             await interaction.response.send_message(
-                "You have no fixtures waiting on availability.", ephemeral=True
+                "You have no fixtures waiting on availability.\n"
+                "-# Open gameweeks: {}. Later ones open closer to the time, or "
+                "when Officials unlock them.".format(open_now),
+                ephemeral=True,
             )
             return
         if len(mine) > 1:
@@ -321,7 +403,7 @@ def register(bot):
             )
             return
         await open_selector(interaction, store, Target(SCOPE_FIXTURE, mine[0]["id"]),
-                            bot.slots)
+                            bot.offerable_slots(mine[0]["gameweek"]))
 
     # ------------------------------------------------------------- fixtures
     @fixture_group.command(name="create", description="Create a fixture and DM both managers")
@@ -564,6 +646,133 @@ def register(bot):
             ephemeral=True,
         )
 
+    gw_group = app_commands.Group(name="gw", description="Gameweeks")
+
+    @gw_group.command(name="list", description="The season calendar and what's open")
+    async def gw_list(interaction):
+        now = utcnow()
+        here = season.current(now)
+        opened = store.opened_gameweeks()
+        lines = ["# {} calendar".format(season.SEASON), ""]
+        for gw in season.ALL:
+            marks = []
+            if here and gw.key == here.key:
+                marks.append("**current**")
+            if gw.key in opened:
+                marks.append("opened early")
+            if not gw.has_fixtures:
+                marks.append("no fixtures yet")
+            count = len(store.fixtures(gameweek=gw.key))
+            if count:
+                marks.append("{} created".format(count))
+            lines.append("`{:<4}` {} — plays {}, deadline {}{}".format(
+                gw.key, gw.label, gw.friday.strftime("%a %d %b"),
+                gw.deadline.strftime("%a %d %b"),
+                "  · " + ", ".join(marks) if marks else "",
+            ))
+        lines += ["", "-# Managers can set availability for the current gameweek, "
+                      "plus any Officials have opened early."]
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @gw_group.command(name="open",
+                      description="Create a gameweek's fixtures and DM every manager")
+    @app_commands.describe(gameweek="e.g. GW2")
+    @staff_only()
+    async def gw_open(interaction, gameweek: str):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            gw = season.gameweek(gameweek)
+        except LookupError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        if not gw.has_fixtures:
+            await interaction.followup.send(
+                "{} has no fixture list yet — add it to season.py once the draw "
+                "is made.".format(gw.key),
+                ephemeral=True,
+            )
+            return
+
+        manager_of = {}
+        missing = []
+        for code, name in season.TEAM_CODES.items():
+            discord_id = store.manager_of(name)
+            if discord_id:
+                manager_of[name] = discord_id
+            elif any(code in (h, a) for h, a, _ in gw.fixtures):
+                missing.append("{} ({})".format(code, name))
+        if missing:
+            await interaction.followup.send(
+                "These teams have no manager registered, so their fixtures "
+                "can't be created:\n{}\n\nAdd them with "
+                "`/managers set team:<name> user:@manager`.".format(
+                    ", ".join(sorted(missing))),
+                ephemeral=True,
+            )
+            return
+
+        store.open_gameweek(gw.key, interaction.user.id)
+        made, skipped, unreachable = await bot.create_gameweek_fixtures(
+            gw, manager_of, opened_by=interaction.user.id
+        )
+        parts = ["Opened **{}** — {} fixture(s) created, deadline {}.".format(
+            gw.key, len(made), gw.deadline.strftime("%a %d %b %H:%M UTC"))]
+        if skipped:
+            parts.append("Skipped {}: {}".format(len(skipped), ", ".join(skipped[:8])))
+        if unreachable:
+            parts.append("⚠️ Couldn't DM {} manager(s) — their DMs are closed. "
+                         "The fallback still covers them.".format(len(set(unreachable))))
+        await interaction.followup.send("\n".join(parts), ephemeral=True)
+
+    @gw_group.command(name="close", description="Stop managers scheduling this gameweek")
+    @staff_only()
+    async def gw_close(interaction, gameweek: str):
+        try:
+            gw = season.gameweek(gameweek)
+        except LookupError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+        store.close_gameweek(gw.key)
+        await interaction.response.send_message(
+            "{} is no longer open early. Existing fixtures are untouched; the "
+            "current gameweek is always open.".format(gw.key),
+            ephemeral=True,
+        )
+
+    managers_group = app_commands.Group(name="managers", description="Team managers")
+
+    @managers_group.command(name="set", description="Say who manages a team")
+    @app_commands.describe(team="Team name as in the timings sheet")
+    @staff_only()
+    async def managers_set(interaction, team: str, user: discord.User):
+        try:
+            resolved = bot.timings.find_team(team).country
+        except LookupError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+        store.set_manager(resolved, user.id)
+        await interaction.response.send_message(
+            "{} manages **{}**.".format(user.mention, resolved), ephemeral=True
+        )
+
+    @managers_group.command(name="list", description="Which teams still have no manager")
+    @staff_only()
+    async def managers_list(interaction, missing_only: bool = True):
+        known = store.managers()
+        lines = []
+        for code, name in sorted(season.TEAM_CODES.items(), key=lambda kv: kv[1]):
+            who = known.get(name)
+            if missing_only and who:
+                continue
+            lines.append("· `{:<3}` {} — {}".format(
+                code, name, "<@{}>".format(who) if who else "**nobody**"))
+        header = "{} of {} teams have a manager.".format(len(known), len(season.TEAM_CODES))
+        body = header + ("\n\n" + "\n".join(lines[:40]) if lines else
+                         "\n\nEvery team is covered. ✅")
+        await interaction.response.send_message(body, ephemeral=True)
+
+    tree.add_command(gw_group)
+    tree.add_command(managers_group)
     tree.add_command(fixture_group)
     tree.add_command(refs_group)
 

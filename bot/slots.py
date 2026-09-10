@@ -19,7 +19,11 @@ from dataclasses import dataclass
 
 # Only offer slots on this boundary. 30 uses every slot in the sheet; 60 uses
 # only the ones on the hour. Applied to BOTH paths, never just one.
-GRANULARITY_MINUTES = 60
+#
+# 30, because the league schedules half-hour kickoffs (the season opens at
+# 17:30). That is 13 slots a day - checked to still fit Discord's component
+# budget, with the day tabs keeping any one message to 13 buttons plus two.
+GRANULARITY_MINUTES = 30
 
 _TIME = re.compile(r"^(\d{1,2}):(\d{2})\s*(AM|PM)$", re.I)
 

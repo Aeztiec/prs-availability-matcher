@@ -84,6 +84,18 @@ CREATE TABLE IF NOT EXISTS log (
     detail      TEXT
 );
 
+CREATE TABLE IF NOT EXISTS managers (
+    team        TEXT    PRIMARY KEY,
+    discord_id  INTEGER NOT NULL,
+    set_at      TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS open_gameweeks (
+    gameweek   TEXT    PRIMARY KEY,
+    opened_by  INTEGER,
+    opened_at  TEXT    NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS boards (
     week        TEXT    PRIMARY KEY,
     channel_id  INTEGER NOT NULL,
@@ -113,6 +125,18 @@ class Store:
         self.path = path
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    def _migrate(self, conn):
+        """Add columns that arrived after the first release.
+
+        CREATE TABLE IF NOT EXISTS will not alter an existing table, so a
+        database made before gameweeks existed needs the column adding rather
+        than the schema silently not applying.
+        """
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(fixtures)")}
+        if "gameweek" not in columns:
+            conn.execute("ALTER TABLE fixtures ADD COLUMN gameweek TEXT")
 
     def _connect(self):
         conn = sqlite3.connect(self.path)
@@ -138,15 +162,16 @@ class Store:
 
     # ----------------------------------------------------------- fixtures
     def create_fixture(self, competition, week, home_team, away_team,
-                       home_manager_id, away_manager_id, deadline, status):
+                       home_manager_id, away_manager_id, deadline, status,
+                       gameweek=None):
         with self._connect() as conn:
             cursor = conn.execute(
                 """INSERT INTO fixtures
                    (competition, week, home_team, away_team, home_manager_id,
-                    away_manager_id, deadline, status, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                    away_manager_id, deadline, status, created_at, gameweek)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (competition, week, home_team, away_team, home_manager_id,
-                 away_manager_id, deadline, status, now()),
+                 away_manager_id, deadline, status, now(), gameweek),
             )
             fixture_id = cursor.lastrowid
         self.note(fixture_id, "fixture created",
@@ -158,10 +183,11 @@ class Store:
             row = conn.execute("SELECT * FROM fixtures WHERE id=?", (fixture_id,)).fetchone()
             return dict(row) if row else None
 
-    def fixtures(self, week=None, competition=None, status=None):
+    def fixtures(self, week=None, competition=None, status=None, gameweek=None):
         sql = "SELECT * FROM fixtures WHERE 1=1"
         args = []
-        for column, value in (("week", week), ("competition", competition), ("status", status)):
+        for column, value in (("week", week), ("competition", competition),
+                              ("status", status), ("gameweek", gameweek)):
             if value is not None:
                 sql += " AND {}=?".format(column)
                 args.append(value)
@@ -492,3 +518,66 @@ class Store:
             if not record or not record["submitted"]:
                 missing.append(manager_id)
         return missing
+
+    # ---------------------------------------------------- open gameweeks
+    def open_gameweek(self, key, opened_by=None):
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO open_gameweeks (gameweek, opened_by, opened_at)
+                   VALUES (?,?,?)
+                   ON CONFLICT(gameweek) DO UPDATE SET
+                       opened_by=excluded.opened_by, opened_at=excluded.opened_at""",
+                (key, opened_by, now()),
+            )
+
+    def close_gameweek(self, key):
+        with self._connect() as conn:
+            conn.execute("DELETE FROM open_gameweeks WHERE gameweek=?", (key,))
+
+    def opened_gameweeks(self):
+        """Gameweeks staff have opened early, beyond the current one."""
+        with self._connect() as conn:
+            return {r["gameweek"] for r in conn.execute(
+                "SELECT gameweek FROM open_gameweeks")}
+
+    def fixture_for(self, gameweek, home_team, away_team):
+        """An existing fixture for this pairing in this gameweek, if any.
+
+        Used to make opening a gameweek idempotent - running it twice must not
+        create twenty duplicate fixtures and DM everyone again.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT * FROM fixtures
+                   WHERE gameweek=? AND home_team=? AND away_team=?""",
+                (gameweek, home_team, away_team),
+            ).fetchone()
+        return dict(row) if row else None
+
+    # ------------------------------------------------------------ managers
+    def set_manager(self, team, discord_id):
+        """Map a sheet team name to a Discord user.
+
+        The timings sheet has in-game usernames, not Discord ids, so this
+        mapping has to be made once per team before a gameweek can be opened
+        in bulk - there is nobody to DM otherwise.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO managers (team, discord_id, set_at) VALUES (?,?,?)
+                   ON CONFLICT(team) DO UPDATE SET
+                       discord_id=excluded.discord_id, set_at=excluded.set_at""",
+                (team, discord_id, now()),
+            )
+
+    def manager_of(self, team):
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT discord_id FROM managers WHERE team=?", (team,)
+            ).fetchone()
+        return row["discord_id"] if row else None
+
+    def managers(self):
+        with self._connect() as conn:
+            return {r["team"]: r["discord_id"]
+                    for r in conn.execute("SELECT team, discord_id FROM managers")}
