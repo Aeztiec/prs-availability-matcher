@@ -27,7 +27,11 @@ def _slot_line(week, slot):
 
 
 def ask_for_availability(fixture, deadline_iso):
-    """The opening DM: what the fixture is and by when."""
+    """The opening post for a single fixture: what it is and by when.
+
+    Used by /fixture create for a one-off. A whole gameweek is announced by
+    fixture_board instead, which covers all twenty at once.
+    """
     return "\n".join([
         "# {} vs {}".format(fixture["home_team"], fixture["away_team"]),
         "Fixture **#{}** needs a kickoff time.".format(fixture["id"]),
@@ -37,31 +41,42 @@ def ask_for_availability(fixture, deadline_iso):
         "",
         "Deadline: {}".format(discord_time(from_iso(deadline_iso))),
         "",
-        "Use **/availability** to open the selector. You can change your answers "
-        "until the deadline.",
+        "Press the button below, or use **/availability**. You can change your "
+        "answers until the deadline.",
         "",
-        "-# If you don't reply, we'll fall back to your team's saved timings and "
-        "allocate a time from those.",
+        "-# If neither of you replies, Officials will allocate a time from your "
+        "teams' saved timings.",
     ])
 
 
-def reminder(fixture, deadline_iso, which):
-    urgency = {"12h": "in about 12 hours", "2h": "in about 2 hours"}.get(
-        which, "soon"
-    )
-    return "\n".join([
-        "⏰ **Reminder — fixture #{}**".format(fixture["id"]),
-        "{} vs {}".format(fixture["home_team"], fixture["away_team"]),
+def reminder(fixture, deadline_iso, which, managers=()):
+    """A public nudge, mentioning whoever still owes an answer.
+
+    Posted in the channel rather than DM'd. A DM only reaches people who allow
+    DMs from server members, and the ones who have not submitted are exactly
+    the ones most likely to have them off.
+    """
+    urgency = {"12h": "in about 12 hours", "2h": "in about 2 hours"}.get(which, "soon")
+    who = " ".join("<@{}>".format(m) for m in managers)
+    lines = [
+        "⏰ **Reminder — {} vs {}**".format(fixture["home_team"], fixture["away_team"]),
+    ]
+    if who:
+        lines.append(who)
+    lines += [
         "",
-        "You haven't submitted your availability yet. The deadline is {} ({}).".format(
-            urgency, discord_time(from_iso(deadline_iso))
+        "Still no timings from {} of you. The deadline is {} ({}).".format(
+            "one" if len(managers) == 1 else "both",
+            urgency, discord_time(from_iso(deadline_iso)),
         ),
         "",
-        "Run **/availability** to do it now.",
+        "Use the **Submit my timings** button on the fixture post, or "
+        "**/availability**.",
         "",
-        "-# Miss the deadline and we'll allocate a time from your team's saved "
-        "timings instead.",
-    ])
+        "-# Miss the deadline and Officials will allocate a time from your "
+        "team's saved timings instead.",
+    ]
+    return "\n".join(lines)
 
 
 def fixture_confirmed(fixture, slot, referee_name=None):
@@ -87,32 +102,43 @@ def fixture_confirmed(fixture, slot, referee_name=None):
     return "\n".join(lines)
 
 
-def referee_offer(fixture, slot):
-    return "\n".join([
-        "# 👨‍⚖️ Referee assignment",
+def referee_offer(fixture, slot, referee_id=None):
+    """A referee assignment, posted in a channel and addressed to one person.
+
+    The buttons only work for whoever was actually offered it, so posting
+    publicly is safe - and it reaches referees with DMs closed, who would
+    otherwise never see the assignment at all.
+    """
+    lines = ["## 👨‍⚖️ Referee needed"]
+    if referee_id:
+        lines.append("<@{}> — can you take this one?".format(referee_id))
+    lines += [
+        "",
         "**{}** vs **{}**  ·  #{}".format(
             fixture["home_team"], fixture["away_team"], fixture["id"]
         ),
-        "",
         _slot_line(fixture["week"], slot),
         "",
-        "Can you take this one?",
+        "-# Only the referee named above can use these buttons.",
+    ]
+    return "\n".join(lines)
+
+
+def referee_confirmed(fixture, slot, referee_id=None):
+    """Posted when a referee is locked in, addressed to them by mention."""
+    lines = ["## 👨‍⚖️ Referee confirmed"]
+    if referee_id:
+        lines.append("<@{}> is refereeing this one.".format(referee_id))
+    lines += [
         "",
-        FOOTER,
-    ])
-
-
-def referee_confirmed(fixture, slot):
-    return "\n".join([
-        "# 👨‍⚖️ You're refereeing",
         "**{}** vs **{}**  ·  #{}".format(
             fixture["home_team"], fixture["away_team"], fixture["id"]
         ),
-        "",
         _slot_line(fixture["week"], slot),
         "",
         FOOTER,
-    ])
+    ]
+    return "\n".join(lines)
 
 
 def no_valid_time(fixture, reason):

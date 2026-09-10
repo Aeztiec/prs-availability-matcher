@@ -52,6 +52,11 @@ COMPETITION = os.environ.get("PRS_COMPETITION", "") or None
 # board is edited rather than reposted as fixtures get times.
 ANNOUNCE_MENTION = os.environ.get("DISCORD_ANNOUNCE_MENTION", "@everyone").strip()
 
+# Where referee assignments are posted. Blank uses the same channel as the
+# gameweek announcement. Nothing is sent by DM: plenty of people have DMs from
+# server members switched off, and a DM to them is simply never delivered.
+REF_CHANNEL_ID = _int("DISCORD_REF_CHANNEL_ID")
+
 # Reminder offsets before the deadline, in hours.
 REMINDERS = (12, 2)
 

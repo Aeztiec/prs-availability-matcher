@@ -143,15 +143,47 @@ class PRSBot(discord.Client):
             pass
 
     # ------------------------------------------------------------ messaging
-    async def dm(self, user_id, content, view=None):
-        """Best-effort DM. Managers with DMs closed must not stall the runner."""
+    async def channel_for(self, week, prefer=None):
+        """Where to post about a week: the given channel, or the board's.
+
+        Nothing is sent by DM. A large share of managers have "direct messages
+        from server members" switched off, and a DM to them is never delivered
+        and never bounces - so it fails silently, which is the worst way for a
+        deadline notice to fail.
+        """
+        if prefer is not None:
+            return prefer
+        record = self.store.board(week)
+        if not record:
+            return None
         try:
-            user = self.get_user(user_id) or await self.fetch_user(user_id)
-            await user.send(content, view=view) if view else await user.send(content)
-            return True
-        except (discord.Forbidden, discord.HTTPException, discord.NotFound) as error:
-            log.warning("could not DM %s: %s", user_id, error)
-            return False
+            return self.get_channel(record["channel_id"]) or \
+                await self.fetch_channel(record["channel_id"])
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
+            log.warning("board channel for %s unreachable: %s", week, error)
+            return None
+
+    async def post(self, channel, content, view=None, mention_users=True):
+        """Post to a channel, allowing user and role pings but never @everyone."""
+        if channel is None:
+            return None
+        allowed = discord.AllowedMentions(
+            everyone=False, roles=True, users=mention_users
+        )
+        try:
+            return await channel.send(content, view=view, allowed_mentions=allowed)
+        except (discord.Forbidden, discord.HTTPException) as error:
+            log.warning("could not post in %s: %s", getattr(channel, "id", "?"), error)
+            return None
+
+    async def referee_channel(self, week):
+        if config.REF_CHANNEL_ID:
+            try:
+                return self.get_channel(config.REF_CHANNEL_ID) or \
+                    await self.fetch_channel(config.REF_CHANNEL_ID)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
+                log.warning("referee channel unreachable: %s", error)
+        return await self.channel_for(week)
 
     async def on_availability_submitted(self, fixture_id):
         """Called by the submit button - schedule the moment both are in."""
@@ -164,14 +196,15 @@ class PRSBot(discord.Client):
         for outcome in run_once(self.store, self.timings, week=week):
             fixture = self.store.fixture(outcome.fixture_id)
             if outcome.action == Action.SCHEDULED:
-                slot = self.slot(fixture["slot_key"])
-                for manager_id in outcome.notify:
-                    await self.dm(manager_id, notify.fixture_confirmed(fixture, slot))
+                # No confirmation message is needed: the announcement the
+                # managers already read updates itself at the end of this pass.
+                pass
             elif outcome.action == Action.REMIND:
+                channel = await self.channel_for(fixture["week"])
                 for which in outcome.reminders:
-                    for manager_id in outcome.notify:
-                        await self.dm(manager_id, notify.reminder(
-                            fixture, fixture["deadline"], which))
+                    await self.post(channel, notify.reminder(
+                        fixture, fixture["deadline"], which,
+                        managers=outcome.notify))
                     self.store.mark_reminded(fixture["id"], which)
             elif outcome.action == Action.NO_VALID_TIME:
                 log.warning("fixture %s needs manual scheduling: %s",
@@ -216,14 +249,18 @@ class PRSBot(discord.Client):
             if candidate is None:
                 log.warning("fixture %s needs a referee by hand", fixture["id"])
                 return None
-            sent = await self.dm(
-                candidate.referee_id, notify.referee_offer(fixture, slot),
+            channel = await self.referee_channel(fixture["week"])
+            sent = await self.post(
+                channel,
+                notify.referee_offer(fixture, slot, referee_id=candidate.referee_id),
                 view=offer_view(fixture["id"]),
             )
             if sent:
                 return candidate
+            # Nowhere to post: record it as declined so the fixture is retried
+            # rather than left waiting on an offer that was never delivered.
             self.store.resolve_offer(fixture["id"], candidate.referee_id, OFFER_DECLINED)
-            self.store.note(fixture["id"], "referee unreachable",
+            self.store.note(fixture["id"], "could not post referee offer",
                             str(candidate.referee_id))
         return None
 
@@ -275,7 +312,7 @@ class PRSBot(discord.Client):
         Idempotent: a pairing that already exists is skipped, so running this
         twice does not duplicate fixtures or spam twenty people again.
         """
-        made, skipped, unreachable = [], [], []
+        made, skipped = [], []
         wanted = gw.fixtures[:limit] if limit else gw.fixtures
         for home_code, away_code, league in wanted:
             home = season.team_name(home_code)
@@ -296,17 +333,10 @@ class PRSBot(discord.Client):
             )
             self.store.note(fixture_id, "gameweek opened",
                             "{} ({}) by {}".format(gw.key, league, opened_by))
-            fixture = self.store.fixture(fixture_id)
             made.append(fixture_id)
-            for manager_id in (home_id, away_id):
-                sent = await self.dm(
-                    manager_id, notify.ask_for_availability(fixture, to_iso(gw.deadline)),
-                    view=opener(Target(SCOPE_FIXTURE, fixture_id)),
-                )
-                if not sent:
-                    unreachable.append(manager_id)
-                    self.store.note(fixture_id, "could not DM", str(manager_id))
-        return made, skipped, unreachable
+        # Managers are told through the announcement and its button, posted by
+        # the caller - not individually.
+        return made, skipped
 
     # ---------------------------------------------------------- fixture board
     def board_bodies(self, week):
@@ -569,20 +599,19 @@ def register(bot):
         )
         fixture = store.fixture(fixture_id)
 
-        reached = []
-        for user in (home_manager, away_manager):
-            ok = await bot.dm(
-                user.id, notify.ask_for_availability(fixture, to_iso(when)),
-                view=opener(Target(SCOPE_FIXTURE, fixture_id)),
-            )
-            reached.append("{} {}".format("✅" if ok else "⚠️", user.mention))
-            if not ok:
-                store.note(fixture_id, "could not DM", str(user.id))
-
+        # Posted, not DM'd: the fixture appears on the week's announcement,
+        # and its managers use the same button as everyone else.
+        posted = await bot.post(
+            interaction.channel,
+            notify.ask_for_availability(fixture, to_iso(when)),
+            view=opener(Target(SCOPE_FIXTURE, fixture_id)),
+        )
         await interaction.followup.send(
-            "Created **#{}** — {} vs {}, deadline {}.\nDMs: {}".format(
+            "Created **#{}** — {} vs {}, deadline {}.\n{}".format(
                 fixture_id, resolved["home"], resolved["away"],
-                when.strftime("%a %d %b %H:%M UTC"), "  ".join(reached),
+                when.strftime("%a %d %b %H:%M UTC"),
+                "Posted here with a submit button."
+                if posted else "⚠️ Couldn't post here — check my permissions.",
             ),
             ephemeral=True,
         )
@@ -637,10 +666,11 @@ def register(bot):
         store.set_schedule(fixture, chosen.key, "MANUAL", Status.SCHEDULED)
         store.note(fixture, "set by hand", "{} by {}".format(chosen.key, interaction.user.id))
         record = store.fixture(fixture)
-        for manager_id in (record["home_manager_id"], record["away_manager_id"]):
-            await bot.dm(manager_id, notify.fixture_confirmed(record, chosen))
-        await interaction.response.send_message(
-            "#{} set to {}.".format(fixture, chosen), ephemeral=True
+        await interaction.response.defer(ephemeral=True)
+        await bot.refresh_board(record["week"])
+        await interaction.followup.send(
+            "#{} set to {}. The fixture post has been updated.".format(fixture, chosen),
+            ephemeral=True,
         )
 
     # ------------------------------------------------------------ referees
@@ -701,12 +731,14 @@ def register(bot):
                          "referee set by hand by {}".format(interaction.user.id))
         record = store.fixture(fixture)
         slot = bot.slot(record["slot_key"])
-        await bot.dm(user.id, notify.referee_confirmed(record, slot))
-        for manager_id in (record["home_manager_id"], record["away_manager_id"]):
-            await bot.dm(manager_id, notify.fixture_confirmed(
-                record, slot, referee_name=user.display_name))
+        channel = await bot.referee_channel(record["week"])
+        await bot.post(channel, notify.referee_confirmed(record, slot,
+                                                         referee_id=user.id))
+        await bot.refresh_board(record["week"])
         await interaction.response.send_message(
-            "{} assigned to #{}.".format(user.mention, fixture), ephemeral=True
+            "{} assigned to #{}. The fixture post has been updated.".format(
+                user.mention, fixture),
+            ephemeral=True,
         )
 
     @refs_group.command(name="availability", description="Set your referee availability")
@@ -830,7 +862,7 @@ def register(bot):
             return
 
         store.open_gameweek(gw.key, interaction.user.id)
-        made, skipped, unreachable = await bot.create_gameweek_fixtures(
+        made, skipped = await bot.create_gameweek_fixtures(
             gw, manager_of, opened_by=interaction.user.id, limit=count
         )
 
@@ -858,9 +890,6 @@ def register(bot):
                              count, len(gw.fixtures)))
         if skipped:
             parts.append("Skipped {}: {}".format(len(skipped), ", ".join(skipped[:8])))
-        if unreachable:
-            parts.append("-# {} manager(s) have DMs closed, so got no DM. They "
-                         "can still use the button above.".format(len(set(unreachable))))
         await interaction.followup.send("\n".join(parts), ephemeral=True)
 
     @gw_group.command(name="close", description="Stop managers scheduling this gameweek")

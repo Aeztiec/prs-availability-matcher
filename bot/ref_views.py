@@ -74,16 +74,16 @@ class AcceptButton(
         store, fixture, slot = resolved
 
         fixture = referees.accept(store, self.fixture_id, interaction.user.id)
+        # The offer post becomes the confirmation, in place - so the channel
+        # keeps one message per fixture rather than a trail of them.
         await interaction.response.edit_message(
-            content=notify.referee_confirmed(fixture, slot), view=None
+            content=notify.referee_confirmed(fixture, slot,
+                                             referee_id=interaction.user.id),
+            view=None,
         )
-        # Managers were told a time already; this fills in the referee.
-        for manager_id in (fixture["home_manager_id"], fixture["away_manager_id"]):
-            await interaction.client.dm(
-                manager_id,
-                notify.fixture_confirmed(fixture, slot,
-                                         referee_name=interaction.user.display_name),
-            )
+        # Nobody is messaged individually. The fixture announcement carries the
+        # referee's name, and refreshing it is how the managers find out.
+        await interaction.client.refresh_board(fixture["week"])
 
 
 class DeclineButton(
