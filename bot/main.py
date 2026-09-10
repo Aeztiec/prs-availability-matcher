@@ -29,7 +29,8 @@ from .orchestrator import Action, dashboard, run_once
 from .scheduling import Status
 from .selector import fits_on_one_message, SelectorState
 from .views import (
-    DYNAMIC_ITEMS, SCOPE_FIXTURE, SCOPE_REF_WEEK, Target, opener, open_selector,
+    DYNAMIC_ITEMS, SCOPE_FIXTURE, SCOPE_REF_WEEK, Target, availability_button,
+    opener, open_selector,
 )
 from .weeks import (
     from_iso, parse_deadline, slot_datetime, to_iso, utcnow, week_of,
@@ -291,7 +292,7 @@ class PRSBot(discord.Client):
             fixture_id = self.store.create_fixture(
                 self.timings.competition.key, gw.week, home, away,
                 home_id, away_id, to_iso(gw.deadline),
-                Status.WAITING_FOR_AVAILABILITY, gameweek=gw.key,
+                Status.WAITING_FOR_AVAILABILITY, gameweek=gw.key, league=league,
             )
             self.store.note(fixture_id, "gameweek opened",
                             "{} ({}) by {}".format(gw.key, league, opened_by))
@@ -310,17 +311,32 @@ class PRSBot(discord.Client):
     # ---------------------------------------------------------- fixture board
     def board_bodies(self, week):
         names = {r["discord_id"]: r["name"] for r in self.store.referees(active_only=False)}
+        gw = next((g for g in season.ALL if g.week == week), None)
         return notify.fixture_board(
-            self.store.fixtures(week=week), week, self.slot, referee_names=names
+            self.store.fixtures(week=week), week, self.slot, referee_names=names,
+            gameweek=gw, deadline=gw.deadline if gw else None,
         )
 
-    async def publish_board(self, week, channel):
-        """Post the week's master list and remember where it lives."""
+    async def publish_board(self, week, channel, with_button=True):
+        """Post the fixture announcement, and the button under it.
+
+        The button is a separate message so the announcement can be edited
+        freely without Discord dropping the components, and so the call to
+        action stays at the bottom of the channel where people will see it.
+        """
         bodies = self.board_bodies(week)
-        message = await channel.send(bodies[0])
-        for extra in bodies[1:]:
-            await channel.send(extra)
-        self.store.set_board(week, channel.id, message.id, notify.board_digest(bodies))
+        sent = [await channel.send(body) for body in bodies]
+        self.store.set_board(week, channel.id, [m.id for m in sent],
+                             notify.board_digest(bodies))
+        message = sent[0]
+
+        if with_button:
+            gw = next((g for g in season.ALL if g.week == week), None)
+            if gw:
+                await channel.send(
+                    notify.availability_call_to_action(gw, gw.deadline),
+                    view=availability_button(),
+                )
         return message
 
     async def refresh_board(self, week):
@@ -787,8 +803,25 @@ def register(bot):
         made, skipped, unreachable = await bot.create_gameweek_fixtures(
             gw, manager_of, opened_by=interaction.user.id, limit=count
         )
+
+        # The announcement is the primary channel, not the DMs. Plenty of
+        # managers have DMs from server members switched off, and for them a DM
+        # is simply never delivered - so the fixture list and the button that
+        # opens the selector both go in the channel where everyone can see them.
+        posted = None
+        try:
+            posted = await bot.publish_board(gw.week, interaction.channel)
+        except (discord.Forbidden, discord.HTTPException) as error:
+            log.warning("could not post the announcement: %s", error)
+
         parts = ["Opened **{}** — {} fixture(s) created, deadline {}.".format(
             gw.key, len(made), gw.deadline.strftime("%a %d %b %H:%M UTC"))]
+        if posted:
+            parts.append("Announcement posted here with the **Submit my "
+                         "timings** button; it updates itself as fixtures are agreed.")
+        else:
+            parts.append("⚠️ Couldn't post the announcement in this channel — "
+                         "check my permissions, then run `/fixture publish`.")
         if count:
             parts.append("-# Limited to the first {} of {} fixtures. Run again "
                          "without `count` to create the rest.".format(
@@ -796,8 +829,8 @@ def register(bot):
         if skipped:
             parts.append("Skipped {}: {}".format(len(skipped), ", ".join(skipped[:8])))
         if unreachable:
-            parts.append("⚠️ Couldn't DM {} manager(s) — their DMs are closed. "
-                         "The fallback still covers them.".format(len(set(unreachable))))
+            parts.append("-# {} manager(s) have DMs closed, so got no DM. They "
+                         "can still use the button above.".format(len(set(unreachable))))
         await interaction.followup.send("\n".join(parts), ephemeral=True)
 
     @gw_group.command(name="close", description="Stop managers scheduling this gameweek")

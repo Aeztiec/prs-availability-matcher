@@ -75,6 +75,7 @@ def build_week(store, count, confirmed=True):
             "S17_Clubs", WEEK, "TEAM {} FC".format(n), "OPPO {} FC".format(n),
             1000 + n, 2000 + n, "2026-09-11T18:00:00Z",
             Status.WAITING_FOR_AVAILABILITY,
+            league=["PL", "BL", "LL", "SA", "L1"][n % 5],
         )
         store.set_schedule(fid, slot.key, Source.MANAGER_PREFERENCES, Status.SCHEDULED)
         if confirmed:
@@ -92,17 +93,15 @@ fid = build_week(store, 1)[0]
 fixture = store.fixture(fid)
 row = board_row(fixture, slot_for(fixture["slot_key"]), referee_name="Ref One")
 check("names both teams", "TEAM 0 FC" in row and "OPPO 0 FC" in row, True)
-check("confirmed icon", row.startswith("✅"), True)
-check("localised timestamp", "<t:" in row and ":t>" in row, True)
-check("referee named", "Ref One" in row, True)
-check("says who chose it", "managers" in row, True)
+check("uses the vs format", " **vs** " in row, True)
+check("localised timestamp", "<t:" in row and ":F>" in row, True)
+check("names the referee", "Ref One" in row, True)
 
 print("\nan unreffed fixture shows a dash rather than a blank")
 store = fresh_store()
 fid = build_week(store, 1, confirmed=False)[0]
 unreffed = board_row(store.fixture(fid), slot_for(store.fixture(fid)["slot_key"]))
-check("dash for no ref", "ref —" in unreffed, True)
-check("orange icon", unreffed.startswith("🟠"), True)
+check("says the ref is tbc", "ref tbc" in unreffed, True)
 
 # --------------------------------------------------------------------------
 print("\na realistic 40-fixture week fits Discord's limits")
@@ -116,7 +115,7 @@ check("longest body", max(len(b) for b in bodies) <= DISCORD_LIMIT, True)
 print("       (split into {} message(s), longest {} chars)".format(
     len(bodies), max(len(b) for b in bodies)))
 check("all 40 fixtures present",
-      sum(b.count(" v ") for b in bodies), 40)
+      sum(b.count(" **vs** ") for b in bodies), 40)
 check("continuation marked when split",
       all("continued" in b for b in bodies[1:]), True)
 
@@ -125,33 +124,39 @@ store = fresh_store()
 build_week(store, 80)
 big = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for)
 check("within limits", all(len(b) <= DISCORD_LIMIT for b in big), True)
-check("nothing dropped", sum(b.count(" v ") for b in big), 80)
+check("nothing dropped", sum(b.count(" **vs** ") for b in big), 80)
 
 # --------------------------------------------------------------------------
-print("\ngrouping and dates")
+print("\ngrouped by division, titled, with the deadline")
 # --------------------------------------------------------------------------
+from bot import season as _season
+
 store = fresh_store()
-build_week(store, 6)
-grouped = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for))
-check("week heading has the date", "12 September 2026" in grouped, True)
-check("Saturday dated", "Saturday 12 Sep" in grouped, True)
-check("Sunday is the day after", "Sunday 13 Sep" in grouped, True)
-check("Friday is the day before", "Friday 11 Sep" in grouped, True)
-check("Saturday comes before Sunday",
-      grouped.index("Saturday 12 Sep") < grouped.index("Sunday 13 Sep"), True)
-check("a legend is included", "confirmed" in grouped and "needs a ref" in grouped, True)
+build_week(store, 10)
+gw1 = _season.gameweek("GW1")
+grouped = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
+                                 gameweek=gw1, deadline=gw1.deadline))
+check("titled with the season and gameweek", "PRS S17 GAMEWEEK 1" in grouped, True)
+check("grouped by division", "__Premier League__" in grouped, True)
+check("every division present",
+      all("__{}__".format(n) in grouped for n in _season.LEAGUES.values()), True)
+check("divisions in a fixed order",
+      grouped.index("__Premier League__") < grouped.index("__Bundesliga__"), True)
+check("the deadline is stated", "SCHEDULING DEADLINE" in grouped, True)
+check("says it updates itself", "Updated automatically" in grouped, True)
 
-print("\nunscheduled fixtures get their own section")
+print("\nan undecided fixture shows a placeholder rather than being dropped")
 store = fresh_store()
 build_week(store, 2)
 store.create_fixture("S17_Clubs", WEEK, "LATE FC", "SLOW FC", 5, 6,
-                     "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY)
+                     "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY,
+                     league="PL")
 mixed = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for))
-check("section present", "Not yet scheduled" in mixed, True)
-check("the unscheduled fixture is listed", "LATE FC" in mixed, True)
+check("shows a placeholder", "to be decided" in mixed, True)
+check("and is still listed", "LATE FC" in mixed, True)
 
 print("\nan empty week says so instead of rendering a bare heading")
-check("empty week", "No fixtures for this week yet" in
+check("empty week", "No fixtures for this gameweek yet" in
       "\n".join(fixture_board([], WEEK, slot_for)), True)
 
 print("\na fixture whose slot the sheet no longer offers is not silently dropped")
@@ -230,6 +235,54 @@ for n in range(15):
 busy = dashboard_summary(dashboard(store, week=WEEK), WEEK)
 check("says how many more", "and 7 more" in busy, True)
 check("still within the limit", len(busy) <= DISCORD_LIMIT, True)
+
+
+# --------------------------------------------------------------------------
+print("\nthe public call to action, for managers whose DMs are closed")
+# --------------------------------------------------------------------------
+from bot.notify import availability_call_to_action
+
+cta = availability_call_to_action(gw1, gw1.deadline)
+check("names the gameweek", "Gameweek 1" in cta, True)
+check("says it opens privately", "privately" in cta, True)
+check("explains the three states",
+      all(w in cta for w in ("ideal", "fine", "no")), True)
+check("states the deadline", "<t:" in cta, True)
+check("tells a non-manager what to do", "ask an Official" in cta, True)
+check("fits Discord's limit", len(cta) <= DISCORD_LIMIT, True)
+
+print("\nthe board tracks every message it occupies")
+store = fresh_store()
+build_week(store, 3)
+store.set_board(WEEK, 111, [201, 202, 203], digest="abc")
+check("all ids kept", store.board_message_ids(WEEK), [201, 202, 203])
+check("first stays in message_id for compatibility",
+      store.board(WEEK)["message_id"], 201)
+store.set_board(WEEK, 111, 999)
+check("a single id still works", store.board_message_ids(WEEK), [999])
+check("no board -> no ids", store.board_message_ids("2099-01-01"), [])
+
+print("\na real gameweek of 20 fixtures across 5 divisions fits")
+store = fresh_store()
+for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
+    fid = store.create_fixture("S17_Clubs", WEEK, _season.team_name(h),
+                               _season.team_name(a), 1000 + n, 2000 + n,
+                               "2026-09-11T18:00:00Z",
+                               Status.WAITING_FOR_AVAILABILITY, league=lg)
+    if n % 2 == 0:
+        store.set_schedule(fid, SLOTS[n % len(SLOTS)].key,
+                           Source.MANAGER_PREFERENCES, Status.SCHEDULED)
+        store.add_referee(800 + n, "Referee Number {}".format(n))
+        store.set_referee(fid, 800 + n)
+real_names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
+real = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, real_names,
+                     gameweek=gw1, deadline=gw1.deadline)
+check("every message within the limit", all(len(b) <= DISCORD_LIMIT for b in real), True)
+check("all 20 rendered", sum(b.count(" **vs** ") for b in real), 20)
+check("half still say to be decided",
+      sum(b.count("to be decided") for b in real), 10)
+print("       ({} message(s), longest {} chars)".format(
+    len(real), max(len(b) for b in real)))
 
 # --------------------------------------------------------------------------
 print("")

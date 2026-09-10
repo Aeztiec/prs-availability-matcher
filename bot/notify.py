@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 from datetime import timedelta
 
+from . import season
 from .scheduling import Source
 
 from .weeks import discord_time, from_iso, slot_datetime, week_saturday
@@ -151,79 +152,113 @@ SOURCE_SHORT = {
 
 
 def board_row(fixture, slot, referee_name=None):
-    """One line of the master list.
+    """One fixture line: "HOME vs AWAY @ <time>".
 
-    The time is <t:...:t> - just the clock, localised by each reader's client.
-    The day heading carries the date, so the row stays unambiguous even for a
-    reader whose local day differs from the league's GMT one.
+    An unscheduled fixture gets a placeholder rather than being left out, so
+    the announcement is the full list from the moment it is posted and managers
+    can see their own game on it before a time exists.
     """
-    icon = STATUS_ICON.get(fixture["status"], "·")
-    when = discord_time(slot_datetime(fixture["week"], slot), "t") if slot else "—"
-    who = referee_name or ("<@{}>".format(fixture["referee_id"])
-                           if fixture["referee_id"] else "—")
-    source = SOURCE_SHORT.get(fixture.get("schedule_source"), "")
-    tail = "  -# {}".format(source) if source else ""
-    return "{} **{}** v **{}** · {} · ref {}{}".format(
-        icon, fixture["home_team"], fixture["away_team"], when, who, tail
-    )
+    home = season.label_for(fixture["home_team"])
+    away = season.label_for(fixture["away_team"])
+    if slot:
+        when = discord_time(slot_datetime(fixture["week"], slot), "F")
+    else:
+        when = "`  ——  to be decided  ——  `"
+    line = "{} **vs** {} @ {}".format(home, away, when)
+    if referee_name:
+        line += "  -# ref {}".format(referee_name)
+    elif slot and not fixture["referee_id"]:
+        line += "  -# ref tbc"
+    return line
 
 
-def fixture_board(fixtures, week, slot_for, referee_names=None):
-    """The whole week as one or more message bodies.
+def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
+                  deadline=None):
+    """The public fixture announcement, grouped by division.
 
-    Returns a list of strings: one per message, so a long week can be posted as
-    several rather than silently truncated.
+    Every fixture appears, scheduled or not. It is edited in place as times get
+    decided, so one message is the whole gameweek's answer - which matters more
+    than it sounds: managers with DMs closed never see a DM, and this is what
+    they read instead.
     """
     referee_names = referee_names or {}
-    scheduled = [f for f in fixtures if f["slot_key"]]
-    unscheduled = [f for f in fixtures if not f["slot_key"]]
 
-    # Group the scheduled ones by day, in slot order.
-    by_day = {}
-    for fixture in scheduled:
-        slot = slot_for(fixture["slot_key"])
-        if not slot:
-            unscheduled.append(fixture)
-            continue
-        by_day.setdefault((slot.day_index, slot.day), []).append((slot, fixture))
+    by_league = {}
+    for fixture in fixtures:
+        key = fixture.get("league") or "??"
+        by_league.setdefault(key, []).append(fixture)
 
-    saturday = week_saturday(week)
-    header = "# Fixtures — week of {}".format(saturday.strftime("%d %B %Y"))
-
+    title = "PRS {} {}".format(
+        season.SEASON, (gameweek.label if gameweek else "Fixtures").upper()
+    )
+    header = "# {}:".format(title.upper())
     lines = [header, ""]
-    for (day_index, day), rows in sorted(by_day.items()):
-        rows.sort(key=lambda pair: pair[0].minutes)
-        offset = {"friday": -1, "saturday": 0, "sunday": 1}.get(day.lower(), 0)
-        date = saturday + timedelta(days=offset)
-        lines.append("**{} {}**".format(day, date.strftime("%d %b")))
-        for slot, fixture in rows:
+
+    order = list(season.LEAGUES) + sorted(k for k in by_league if k not in season.LEAGUES)
+    for key in order:
+        rows = by_league.get(key)
+        if not rows:
+            continue
+        lines.append("## __{}__:".format(season.LEAGUES.get(key, key)))
+        # Scheduled first, in kickoff order, then the undecided ones.
+        def sort_key(fixture):
+            slot = slot_for(fixture["slot_key"]) if fixture["slot_key"] else None
+            if not slot:
+                return (1, 0, 0)
+            return (0, slot.day_index, slot.minutes)
+        for fixture in sorted(rows, key=sort_key):
             lines.append(board_row(
-                fixture, slot, referee_names.get(fixture["referee_id"])
+                fixture, slot_for(fixture["slot_key"]) if fixture["slot_key"] else None,
+                referee_names.get(fixture["referee_id"]),
             ))
         lines.append("")
 
-    if unscheduled:
-        lines.append("**Not yet scheduled**")
-        for fixture in unscheduled:
-            lines.append("{} **{}** v **{}**".format(
-                STATUS_ICON.get(fixture["status"], "·"),
-                fixture["home_team"], fixture["away_team"],
-            ))
+    if not fixtures:
+        lines.append("_No fixtures for this gameweek yet._")
         lines.append("")
 
-    if not scheduled and not unscheduled:
-        lines.append("_No fixtures for this week yet._")
-        lines.append("")
-
-    lines.append("-# ✅ confirmed · 🟠 needs a ref · 🔴 needs scheduling · "
-                 "🟡 awaiting managers")
-    lines.append("-# Times show in your own timezone.")
+    if deadline is not None:
+        lines.append("**SCHEDULING DEADLINE:**")
+        lines.append(discord_time(deadline, "F"))
+        lines.append("-# If both managers haven't agreed by then, Officials set "
+                     "the time from your submitted timings.")
+    lines.append("-# Times show in your own timezone. Updated automatically as "
+                 "fixtures are agreed.")
 
     return _chunk(lines, header)
 
 
+def availability_call_to_action(gameweek, deadline):
+    """The message posted under the announcement, with the button on it.
+
+    Public and button-driven on purpose. A DM only reaches managers who allow
+    them; a button in a channel reaches everyone, and each person who clicks it
+    gets their own private selector.
+    """
+    return "\n".join([
+        "## 📋 Managers — submit your timings",
+        "",
+        "Press the button below to set when **your** team can play in "
+        "**{}**. It opens privately, so only you see it.".format(gameweek.label),
+        "",
+        "Mark every time you could play — **🟢 ideal**, **🟡 fine**, or leave it "
+        "**⚪ no**. We pick the best time you and your opponent both agree on, "
+        "and the fixture list above fills in by itself.",
+        "",
+        "You can change your answers until {}.".format(discord_time(deadline, "F")),
+        "",
+        "-# Nothing to submit? That means your gameweek isn't open yet, or "
+        "you're not registered as a manager — ask an Official.",
+    ])
+
+
 def _chunk(lines, header):
-    """Split rendered lines into message-sized pieces, never mid-row."""
+    """Split rendered lines into message-sized pieces, never mid-row.
+
+    Discord rejects a message over 2000 characters outright, and a full
+    gameweek of twenty fixtures across five divisions clears that once the
+    division headings are in.
+    """
     messages = []
     current = []
     length = 0

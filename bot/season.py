@@ -106,6 +106,11 @@ TEAM_CODES = {
     "OGC": "OGC NICE",
 }
 
+# Optional: a custom emoji per team, shown in the public fixture announcement
+# the way the league's own posts do it. Fill in as ":name:" or "<:name:id>";
+# anything missing simply falls back to the team's name.
+TEAM_EMOJI = {}
+
 LEAGUES = {
     "PL": "Premier League",
     "BL": "Bundesliga",
@@ -277,3 +282,17 @@ def validate(sheet_team_names):
             problems.append("fixtures for unknown gameweek '{}'".format(key))
 
     return problems
+
+
+def league_of(gameweek_key, home_code, away_code):
+    """Which league a fixture belongs to, or None if it isn't in the list."""
+    for home, away, league in FIXTURES.get(gameweek_key, []):
+        if (home, away) == (home_code, away_code):
+            return league
+    return None
+
+
+def label_for(team_name):
+    """How a team appears in a public post: its emoji if set, else its name."""
+    emoji = TEAM_EMOJI.get(team_name)
+    return "{} {}".format(emoji, team_name) if emoji else team_name

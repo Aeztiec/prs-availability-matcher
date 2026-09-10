@@ -393,3 +393,78 @@ def opener(target, label="Set availability"):
 
 
 DYNAMIC_ITEMS = DYNAMIC_ITEMS + (OpenButton,)
+
+
+class MyAvailabilityButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"avme",
+):
+    """One public button that opens the clicker's own selector.
+
+    Not tied to a fixture: it looks up whoever pressed it and finds their open
+    game. That is the whole point - a DM only reaches managers who allow DMs,
+    whereas a button in a channel reaches everyone, and each person still gets
+    a private response.
+    """
+
+    def __init__(self):
+        super().__init__(
+            discord.ui.Button(
+                label="Submit my timings",
+                style=discord.ButtonStyle.success,
+                emoji="📋",
+                custom_id="avme",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, interaction):
+        bot = interaction.client
+        store = bot.store
+        mine = bot.my_open_fixtures(interaction.user.id)
+
+        if not mine:
+            managed = [t for t, uid in store.managers().items()
+                       if uid == interaction.user.id]
+            if not managed:
+                await interaction.response.send_message(
+                    "You're not registered as a manager yet — ask an Official "
+                    "to add you with `/managers set`.",
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.send_message(
+                "Nothing to submit right now. Either your fixture already has "
+                "a time, or the next gameweek isn't open yet.\n"
+                "-# You manage: {}".format(", ".join(sorted(managed))),
+                ephemeral=True,
+            )
+            return
+
+        if len(mine) > 1:
+            listing = "\n".join(
+                "· **{}** v **{}**  — `/availability fixture:{}`".format(
+                    f["home_team"], f["away_team"], f["id"])
+                for f in mine
+            )
+            await interaction.response.send_message(
+                "You have more than one game open. Pick one:\n\n" + listing,
+                ephemeral=True,
+            )
+            return
+
+        fixture = mine[0]
+        await open_selector(interaction, store, Target(SCOPE_FIXTURE, fixture["id"]),
+                            bot.offerable_slots(fixture["gameweek"]))
+
+
+def availability_button():
+    view = discord.ui.View(timeout=None)
+    view.add_item(MyAvailabilityButton())
+    return view
+
+
+DYNAMIC_ITEMS = DYNAMIC_ITEMS + (MyAvailabilityButton,)

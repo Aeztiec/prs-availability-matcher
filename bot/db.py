@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS boards (
     updated_at  TEXT    NOT NULL
 );
 
+
 CREATE INDEX IF NOT EXISTS ix_fixtures_week   ON fixtures(week, competition);
 CREATE INDEX IF NOT EXISTS ix_fixtures_status ON fixtures(status);
 CREATE INDEX IF NOT EXISTS ix_log_fixture     ON log(fixture_id, id);
@@ -137,6 +138,11 @@ class Store:
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(fixtures)")}
         if "gameweek" not in columns:
             conn.execute("ALTER TABLE fixtures ADD COLUMN gameweek TEXT")
+        if "league" not in columns:
+            conn.execute("ALTER TABLE fixtures ADD COLUMN league TEXT")
+        board_columns = {r["name"] for r in conn.execute("PRAGMA table_info(boards)")}
+        if "message_ids" not in board_columns:
+            conn.execute("ALTER TABLE boards ADD COLUMN message_ids TEXT")
 
     def _connect(self):
         conn = sqlite3.connect(self.path)
@@ -163,15 +169,15 @@ class Store:
     # ----------------------------------------------------------- fixtures
     def create_fixture(self, competition, week, home_team, away_team,
                        home_manager_id, away_manager_id, deadline, status,
-                       gameweek=None):
+                       gameweek=None, league=None):
         with self._connect() as conn:
             cursor = conn.execute(
                 """INSERT INTO fixtures
                    (competition, week, home_team, away_team, home_manager_id,
-                    away_manager_id, deadline, status, created_at, gameweek)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    away_manager_id, deadline, status, created_at, gameweek, league)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (competition, week, home_team, away_team, home_manager_id,
-                 away_manager_id, deadline, status, now(), gameweek),
+                 away_manager_id, deadline, status, now(), gameweek, league),
             )
             fixture_id = cursor.lastrowid
         self.note(fixture_id, "fixture created",
@@ -476,18 +482,43 @@ class Store:
         with self._connect() as conn:
             return [dict(r) for r in conn.execute("SELECT * FROM boards ORDER BY week")]
 
-    def set_board(self, week, channel_id, message_id, digest=None):
+    def set_board(self, week, channel_id, message_ids, digest=None):
+        """Remember every message the board occupies, not just the first.
+
+        A fully scheduled gameweek needs two messages once referee names are
+        in, and editing only the first would leave the second half of the
+        fixture list frozen at whatever it said when posted.
+        """
+        if isinstance(message_ids, int):
+            message_ids = [message_ids]
+        message_ids = list(message_ids)
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO boards (week, channel_id, message_id, digest, updated_at)
-                   VALUES (?,?,?,?,?)
+                """INSERT INTO boards (week, channel_id, message_id, message_ids,
+                                       digest, updated_at)
+                   VALUES (?,?,?,?,?,?)
                    ON CONFLICT(week) DO UPDATE SET
                        channel_id=excluded.channel_id,
                        message_id=excluded.message_id,
+                       message_ids=excluded.message_ids,
                        digest=excluded.digest,
                        updated_at=excluded.updated_at""",
-                (week, channel_id, message_id, digest, now()),
+                (week, channel_id, message_ids[0], json.dumps(message_ids),
+                 digest, now()),
             )
+
+    def board_message_ids(self, week):
+        """Every message id for a board, oldest first."""
+        record = self.board(week)
+        if not record:
+            return []
+        raw = record.get("message_ids")
+        if raw:
+            try:
+                return [int(x) for x in json.loads(raw)]
+            except (ValueError, TypeError):
+                pass
+        return [record["message_id"]]
 
     def set_board_digest(self, week, digest):
         """Remember what was last published, so an unchanged board is not edited.
