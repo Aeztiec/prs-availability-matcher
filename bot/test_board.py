@@ -285,6 +285,45 @@ print("       ({} message(s), longest {} chars)".format(
     len(real), max(len(b) for b in real)))
 
 # --------------------------------------------------------------------------
+print("\nclub badges, and what they cost in message length")
+# --------------------------------------------------------------------------
+# A "<:CODE:1547614892981354567>" badge is ~28 characters, so two per row adds
+# well over a thousand across a full gameweek. Worth pinning down: if all forty
+# divisions get badges and that tips a message past 2000, Discord rejects it
+# outright - and it would only happen once someone finished uploading them.
+real_emoji = dict(_season.TEAM_EMOJI)
+_season.TEAM_EMOJI = {name: "<:{}:1547614892981354567>".format(code)
+                      for code, name in _season.TEAM_CODES.items()}
+try:
+    store = fresh_store()
+    for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
+        fid = store.create_fixture("S17_Clubs", WEEK, _season.team_name(h),
+                                   _season.team_name(a), 1000 + n, 2000 + n,
+                                   "2026-09-11T18:00:00Z",
+                                   Status.WAITING_FOR_AVAILABILITY, league=lg)
+        store.set_schedule(fid, SLOTS[n % len(SLOTS)].key,
+                           Source.MANAGER_PREFERENCES, Status.SCHEDULED)
+        store.add_referee(700 + n, "Referee Longname {}".format(n))
+        store.set_referee(fid, 700 + n)
+    badge_names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
+    badged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, badge_names,
+                           gameweek=gw1, deadline=gw1.deadline)
+    check("still within the limit with all 40 badges",
+          all(len(b) <= DISCORD_LIMIT for b in badged), True)
+    check("nothing dropped when it splits",
+          sum(b.count(" **vs** ") for b in badged), 20)
+    check("badges actually rendered", "<:ARS:" in "\n".join(badged), True)
+    print("       ({} message(s), longest {} chars)".format(
+        len(badged), max(len(b) for b in badged)))
+finally:
+    _season.TEAM_EMOJI = real_emoji
+
+check("a team without a badge falls back to its name",
+      _season.label_for("NO SUCH TEAM"), "NO SUCH TEAM")
+check("a team with one is prefixed",
+      _season.label_for("ARSENAL").startswith("<:ARS:"), True)
+
+# --------------------------------------------------------------------------
 print("")
 if FAILURES:
     print("{} FAILED: {}".format(len(FAILURES), ", ".join(FAILURES)))

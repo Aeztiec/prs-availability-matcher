@@ -106,10 +106,26 @@ TEAM_CODES = {
     "OGC": "OGC NICE",
 }
 
-# Optional: a custom emoji per team, shown in the public fixture announcement
-# the way the league's own posts do it. Fill in as ":name:" or "<:name:id>";
-# anything missing simply falls back to the team's name.
-TEAM_EMOJI = {}
+# The club badge shown beside a team in the public fixture announcement.
+#
+# Must be the full "<:name:id>" form, not ":name:" - a bot cannot resolve a
+# shortcode, so ":ARS:" would post as literal text. The ids below were read
+# from the server's own emoji, matched by the three-letter team code.
+#
+# Any team left out simply shows its name, so this can be filled in a division
+# at a time. To add more: upload the emoji named after the team's code from
+# TEAM_CODES above, then run  python -m bot.sync_emoji  to pick them up.
+TEAM_EMOJI = {
+    # Premier League
+    "ARSENAL": "<:ARS:1547614892981354567>",
+    "ASTON VILLA": "<:AST:1547614917996191844>",
+    "CHELSEA": "<:CHE:1547614945078681710>",
+    "LIVERPOOL": "<:LIV:1547614968994861116>",
+    "MANCHESTER CITY": "<:MCI:1547615023486996550>",
+    "MANCHESTER UNITED": "<:MUN:1547614992956915732>",
+    "NEWCASTLE UNITED": "<:NEW:1547615042554437662>",
+    "TOTTENHAM HOTSPUR": "<:TOT:1547615066755432558>",
+}
 
 LEAGUES = {
     "PL": "Premier League",
