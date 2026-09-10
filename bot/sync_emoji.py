@@ -70,12 +70,39 @@ def render_leagues(matched):
 def write_into_season(block, pattern_name="TEAM_EMOJI"):
     with open(SEASON_FILE, encoding="utf-8") as handle:
         text = handle.read()
-    pattern = re.compile(r"^{} = \{{.*?^\}}".format(pattern_name), re.S | re.M)
-    if not pattern.search(text):
-        raise SystemExit("couldn't find the {} block in season.py".format(pattern_name))
+    # Two shapes to match: an empty one-liner, or a multi-line dict closed by a
+    # brace in column zero. Matching only the latter is how an earlier version
+    # of this ate everything between "LEAGUE_EMOJI = {}" and the next block's
+    # closing brace - so the empty form is matched first and explicitly.
+    empty = re.compile(r"^{} = \{{\s*\}}$".format(pattern_name), re.M)
+    filled = re.compile(r"^{} = \{{\n.*?\n\}}$".format(pattern_name), re.S | re.M)
+
+    for pattern in (empty, filled):
+        if pattern.search(text):
+            updated = pattern.sub(lambda _: block, text, count=1)
+            break
+    else:
+        raise SystemExit(
+            "couldn't find a {} block in season.py to replace".format(pattern_name)
+        )
+
+    # Refuse to write something that would not import - a corrupted season.py
+    # takes the whole bot down, and this runs unattended from a shell.
+    try:
+        compile(updated, SEASON_FILE, "exec")
+    except SyntaxError as error:
+        raise SystemExit(
+            "refusing to write: the result would not parse ({})".format(error)
+        )
+    for needed in ("GAMEWEEKS", "TEAM_CODES", "FIXTURES", "LEAGUES"):
+        if "\n{} = ".format(needed) not in updated:
+            raise SystemExit(
+                "refusing to write: {} went missing from the result".format(needed)
+            )
+
     with open(SEASON_FILE, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(pattern.sub(lambda _: block, text, count=1))
-    print("Updated {}".format(os.path.relpath(SEASON_FILE)))
+        handle.write(updated)
+    print("Updated {} ({})".format(os.path.relpath(SEASON_FILE), pattern_name))
 
 
 class Reader(discord.Client):

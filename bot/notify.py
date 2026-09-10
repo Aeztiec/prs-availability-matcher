@@ -196,7 +196,7 @@ def board_row(fixture, slot, referee_name=None):
 
 
 def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
-                  deadline=None, mention=None):
+                  deadline=None, mention=None, competition=None):
     """The public fixture announcement, grouped by division.
 
     Every fixture appears, scheduled or not. It is edited in place as times get
@@ -211,16 +211,20 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
         key = fixture.get("league") or "??"
         by_league.setdefault(key, []).append(fixture)
 
-    heading = "PRS {} {}:".format(
-        season.SEASON_LABEL, (gameweek.label if gameweek else "FIXTURES").upper()
-    )
+    # "PRS SEASON 17 CLUBS GAMEWEEK 1:" - the competition sits between the
+    # season and the gameweek, matching how the league titles its own posts.
+    parts = ["PRS", season.SEASON_LABEL]
+    if competition:
+        parts.append(competition.upper())
+    parts.append((gameweek.label if gameweek else "FIXTURES").upper())
+    header = "**__{}:__**".format(" ".join(parts))
     if season.SEASON_EMOJI:
-        heading = "{}  {}".format(heading, season.SEASON_EMOJI)
-    header = "**__{}__**".format(heading)
+        header = "{}  {}".format(header, season.SEASON_EMOJI)
 
     # The ping sits above the heading in a spoiler: it still notifies, but
     # collapses to a grey block instead of shouting at the top of the post.
-    lines = (["||{}||".format(mention)] if mention else []) + [header, ""]
+    # A blank line after it keeps the heading clear of the spoiler block.
+    lines = (["||{}||".format(mention), ""] if mention else []) + [header, ""]
 
     order = list(season.LEAGUES) + sorted(k for k in by_league if k not in season.LEAGUES)
     for key in order:
@@ -230,6 +234,7 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
         lines.append("**__{}:__**  {}".format(
             season.LEAGUES.get(key, key), season.LEAGUE_EMOJI.get(key, "")
         ).rstrip())
+
 
         def sort_key(fixture):
             slot = slot_for(fixture["slot_key"]) if fixture["slot_key"] else None

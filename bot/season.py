@@ -30,8 +30,14 @@ SEASON_LABEL = "SEASON 17"
 # Optional emoji after the heading and after each division name, the way the
 # league's own posts do it. Upload one named after the league code below (PL,
 # BL, LL, SA, L1) and `python -m bot.sync_emoji --write` picks them up.
-SEASON_EMOJI = ""
-LEAGUE_EMOJI = {}
+SEASON_EMOJI = "<:PRS:1547631713444962304>"
+LEAGUE_EMOJI = {
+    "PL": "<:PL:1547631688253833367>",  # Premier League
+    "BL": "<:BL:1547631650203107398>",  # Bundesliga
+    "LL": "<:LL:1547631605693292615>",  # La Liga
+    "SA": "<:SA:1547631585225080944>",  # Serie A
+    "L1": "<:L1:1547631556351234128>",  # Ligue 1
+}
 
 # No match may start before this. From the league instructions: "You can
 # schedule games to be played from Thursday, 17 September 2026 17:30 onwards".

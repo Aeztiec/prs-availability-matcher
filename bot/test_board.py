@@ -327,8 +327,8 @@ _season.SEASON_EMOJI = "<:PRS:456>"
 try:
     decorated = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                                         gameweek=gw1, deadline=gw1.deadline))
-    check("season emoji follows the heading",
-          "GAMEWEEK 1:  <:PRS:456>__**" in decorated, True)
+    check("season emoji follows the heading, outside the underline",
+          "GAMEWEEK 1:__**  <:PRS:456>" in decorated, True)
     check("league emoji follows its division",
           "**__Premier League:__**  <:PL:123>" in decorated, True)
     check("a division without one has no trailing space",
@@ -376,8 +376,10 @@ pinged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                        gameweek=gw1, deadline=gw1.deadline, mention="@everyone")
 check("the ping is spoilered on the first line",
       pinged[0].splitlines()[0], "||@everyone||")
-check("it sits above the heading",
-      pinged[0].splitlines()[1].startswith("**__PRS"), True)
+check("a blank line separates it from the heading",
+      pinged[0].splitlines()[1], "")
+check("then the heading",
+      pinged[0].splitlines()[2].startswith("**__PRS"), True)
 check("only the first message carries it",
       all(not b.startswith("||") for b in pinged[1:]), True)
 quiet = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,

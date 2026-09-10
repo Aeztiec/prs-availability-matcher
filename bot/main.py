@@ -346,6 +346,7 @@ class PRSBot(discord.Client):
             self.store.fixtures(week=week), week, self.slot, referee_names=names,
             gameweek=gw, deadline=gw.deadline if gw else None,
             mention=config.ANNOUNCE_MENTION or None,
+            competition=self.timings.competition.competition,
         )
 
     async def publish_board(self, week, channel, with_button=True):
