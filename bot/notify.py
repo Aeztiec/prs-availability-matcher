@@ -178,23 +178,20 @@ SOURCE_SHORT = {
 
 
 def board_row(fixture, slot, referee_name=None):
-    """One fixture line: "HOME vs AWAY @ <time>".
+    """One fixture line: two badges, then the kickoff.
 
-    An unscheduled fixture gets a placeholder rather than being left out, so
-    the announcement is the full list from the moment it is posted and managers
-    can see their own game on it before a time exists.
+    Badges only, no team names - that is how the league's own posts read, and
+    at forty fixtures the names are what pushes a gameweek over Discord's
+    message limit. A team with no badge configured falls back to its name,
+    since an empty side would leave the row meaningless.
     """
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
-    if slot:
-        when = discord_time(slot_datetime(fixture["week"], slot), "F")
-    else:
-        when = "`TBD`"
-    line = "{} **vs** {} @ {}".format(home, away, when)
+    when = (discord_time(slot_datetime(fixture["week"], slot), "F")
+            if slot else "`TBD`")
+    line = "{} *vs* {} @ {}".format(home, away, when)
     if referee_name:
-        line += "  -# ref {}".format(referee_name)
-    elif slot and not fixture["referee_id"]:
-        line += "  -# ref tbc"
+        line += "  -# {}".format(referee_name)
     return line
 
 
@@ -214,26 +211,32 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
         key = fixture.get("league") or "??"
         by_league.setdefault(key, []).append(fixture)
 
-    title = "PRS {} {}".format(
-        season.SEASON, (gameweek.label if gameweek else "Fixtures").upper()
+    heading = "PRS {} {}:".format(
+        season.SEASON_LABEL, (gameweek.label if gameweek else "FIXTURES").upper()
     )
-    header = "# {}:".format(title.upper())
-    # The ping goes above the heading, where the league's own posts put it.
-    # Only the first send notifies anyone; later edits do not re-ping.
-    lines = ([mention] if mention else []) + [header, ""]
+    if season.SEASON_EMOJI:
+        heading = "{}  {}".format(heading, season.SEASON_EMOJI)
+    header = "**__{}__**".format(heading)
+
+    # The ping sits above the heading in a spoiler: it still notifies, but
+    # collapses to a grey block instead of shouting at the top of the post.
+    lines = (["||{}||".format(mention)] if mention else []) + [header, ""]
 
     order = list(season.LEAGUES) + sorted(k for k in by_league if k not in season.LEAGUES)
     for key in order:
         rows = by_league.get(key)
         if not rows:
             continue
-        lines.append("## __{}__:".format(season.LEAGUES.get(key, key)))
-        # Scheduled first, in kickoff order, then the undecided ones.
+        lines.append("**__{}:__**  {}".format(
+            season.LEAGUES.get(key, key), season.LEAGUE_EMOJI.get(key, "")
+        ).rstrip())
+
         def sort_key(fixture):
             slot = slot_for(fixture["slot_key"]) if fixture["slot_key"] else None
             if not slot:
                 return (1, 0, 0)
             return (0, slot.day_index, slot.minutes)
+
         for fixture in sorted(rows, key=sort_key):
             lines.append(board_row(
                 fixture, slot_for(fixture["slot_key"]) if fixture["slot_key"] else None,
@@ -245,15 +248,18 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
         lines.append("_No fixtures for this gameweek yet._")
         lines.append("")
 
+    footer = []
     if deadline is not None:
-        lines.append("**SCHEDULING DEADLINE:**")
-        lines.append(discord_time(deadline, "F"))
-        lines.append("-# If both managers haven't agreed by then, Officials set "
-                     "the time from your submitted timings.")
-    lines.append("-# Times show in your own timezone. Updated automatically as "
-                 "fixtures are agreed.")
+        footer += [
+            "**SCHEDULING DEADLINE:**",
+            discord_time(deadline, "F"),
+            "-# Not agreed by then and Officials set the time from your "
+            "submitted timings.",
+        ]
+    footer.append("-# Times show in your own timezone. This post updates itself "
+                  "as fixtures are agreed.")
 
-    return _chunk(lines, header)
+    return _chunk(lines, footer=footer)
 
 
 def availability_call_to_action(gameweek, deadline):
@@ -280,26 +286,39 @@ def availability_call_to_action(gameweek, deadline):
     ])
 
 
-def _chunk(lines, header):
+def _chunk(lines, footer=()):
     """Split rendered lines into message-sized pieces, never mid-row.
 
     Discord rejects a message over 2000 characters outright, and a full
-    gameweek of twenty fixtures across five divisions clears that once the
-    division headings are in.
+    gameweek of twenty fixtures across five divisions clears that once club
+    badges are in - a badge is ~28 characters and there are two per row.
+
+    `footer` is kept whole and attached to the last message, or given one of
+    its own if it will not fit. Chunking it with everything else split the
+    deadline away from the line explaining it, which read like a mistake.
     """
     messages = []
     current = []
     length = 0
     for line in lines:
         if length + len(line) + 1 > BOARD_CHUNK and current:
-            messages.append("\n".join(current))
+            messages.append(current)
             current = ["-# …continued"]
             length = len(current[0])
         current.append(line)
         length += len(line) + 1
     if current:
-        messages.append("\n".join(current))
-    return messages
+        messages.append(current)
+
+    footer = list(footer)
+    if footer:
+        tail = sum(len(line) + 1 for line in footer)
+        if messages and length + tail <= BOARD_CHUNK:
+            messages[-1] += footer
+        else:
+            messages.append(["-# …continued"] + footer)
+
+    return ["\n".join(block) for block in messages] or [""]
 
 
 def board_digest(bodies):

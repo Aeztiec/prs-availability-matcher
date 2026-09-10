@@ -93,7 +93,7 @@ fid = build_week(store, 1)[0]
 fixture = store.fixture(fid)
 row = board_row(fixture, slot_for(fixture["slot_key"]), referee_name="Ref One")
 check("names both teams", "TEAM 0 FC" in row and "OPPO 0 FC" in row, True)
-check("uses the vs format", " **vs** " in row, True)
+check("uses the vs format", " *vs* " in row, True)
 check("localised timestamp", "<t:" in row and ":F>" in row, True)
 check("names the referee", "Ref One" in row, True)
 
@@ -101,7 +101,7 @@ print("\nan unreffed fixture shows a dash rather than a blank")
 store = fresh_store()
 fid = build_week(store, 1, confirmed=False)[0]
 unreffed = board_row(store.fixture(fid), slot_for(store.fixture(fid)["slot_key"]))
-check("says the ref is tbc", "ref tbc" in unreffed, True)
+check("no ref shown until one is assigned", "-#" in unreffed, False)
 
 # --------------------------------------------------------------------------
 print("\na realistic 40-fixture week fits Discord's limits")
@@ -115,7 +115,7 @@ check("longest body", max(len(b) for b in bodies) <= DISCORD_LIMIT, True)
 print("       (split into {} message(s), longest {} chars)".format(
     len(bodies), max(len(b) for b in bodies)))
 check("all 40 fixtures present",
-      sum(b.count(" **vs** ") for b in bodies), 40)
+      sum(b.count(" *vs* ") for b in bodies), 40)
 check("continuation marked when split",
       all("continued" in b for b in bodies[1:]), True)
 
@@ -124,7 +124,7 @@ store = fresh_store()
 build_week(store, 80)
 big = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for)
 check("within limits", all(len(b) <= DISCORD_LIMIT for b in big), True)
-check("nothing dropped", sum(b.count(" **vs** ") for b in big), 80)
+check("nothing dropped", sum(b.count(" *vs* ") for b in big), 80)
 
 # --------------------------------------------------------------------------
 print("\ngrouped by division, titled, with the deadline")
@@ -136,14 +136,15 @@ build_week(store, 10)
 gw1 = _season.gameweek("GW1")
 grouped = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                                  gameweek=gw1, deadline=gw1.deadline))
-check("titled with the season and gameweek", "PRS S17 GAMEWEEK 1" in grouped, True)
-check("grouped by division", "__Premier League__" in grouped, True)
+check("titled with the season and gameweek",
+      "**__PRS SEASON 17 GAMEWEEK 1:__**" in grouped, True)
+check("grouped by division", "**__Premier League:__**" in grouped, True)
 check("every division present",
-      all("__{}__".format(n) in grouped for n in _season.LEAGUES.values()), True)
+      all("**__{}:__**".format(n) in grouped for n in _season.LEAGUES.values()), True)
 check("divisions in a fixed order",
-      grouped.index("__Premier League__") < grouped.index("__Bundesliga__"), True)
+      grouped.index("Premier League:") < grouped.index("Bundesliga:"), True)
 check("the deadline is stated", "SCHEDULING DEADLINE" in grouped, True)
-check("says it updates itself", "Updated automatically" in grouped, True)
+check("says it updates itself", "updates itself" in grouped, True)
 
 print("\nan undecided fixture shows a placeholder rather than being dropped")
 store = fresh_store()
@@ -278,7 +279,7 @@ real_names = {r["discord_id"]: r["name"] for r in store.referees(active_only=Fal
 real = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, real_names,
                      gameweek=gw1, deadline=gw1.deadline)
 check("every message within the limit", all(len(b) <= DISCORD_LIMIT for b in real), True)
-check("all 20 rendered", sum(b.count(" **vs** ") for b in real), 20)
+check("all 20 rendered", sum(b.count(" *vs* ") for b in real), 20)
 check("half still say TBD",
       sum(b.count("`TBD`") for b in real), 10)
 print("       ({} message(s), longest {} chars)".format(
@@ -311,12 +312,56 @@ try:
     check("still within the limit with all 40 badges",
           all(len(b) <= DISCORD_LIMIT for b in badged), True)
     check("nothing dropped when it splits",
-          sum(b.count(" **vs** ") for b in badged), 20)
+          sum(b.count(" *vs* ") for b in badged), 20)
     check("badges actually rendered", "<:ARS:" in "\n".join(badged), True)
     print("       ({} message(s), longest {} chars)".format(
         len(badged), max(len(b) for b in badged)))
 finally:
     _season.TEAM_EMOJI = real_emoji
+
+print("\ndivision and season emoji")
+real_league = dict(_season.LEAGUE_EMOJI)
+real_season = _season.SEASON_EMOJI
+_season.LEAGUE_EMOJI = {"PL": "<:PL:123>"}
+_season.SEASON_EMOJI = "<:PRS:456>"
+try:
+    decorated = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
+                                        gameweek=gw1, deadline=gw1.deadline))
+    check("season emoji follows the heading",
+          "GAMEWEEK 1:  <:PRS:456>__**" in decorated, True)
+    check("league emoji follows its division",
+          "**__Premier League:__**  <:PL:123>" in decorated, True)
+    check("a division without one has no trailing space",
+          "**__Bundesliga:__**\n" in decorated, True)
+finally:
+    _season.LEAGUE_EMOJI = real_league
+    _season.SEASON_EMOJI = real_season
+
+print("\nthe footer is never split away from its deadline")
+footer_store = fresh_store()
+for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
+    fid = footer_store.create_fixture("S17_Clubs", WEEK, _season.team_name(h),
+                                      _season.team_name(a), 1000 + n, 2000 + n,
+                                      "2026-09-11T18:00:00Z",
+                                      Status.WAITING_FOR_AVAILABILITY, league=lg)
+    footer_store.set_schedule(fid, SLOTS[n % len(SLOTS)].key,
+                              Source.MANAGER_PREFERENCES, Status.SCHEDULED)
+saved_badges = dict(_season.TEAM_EMOJI)
+_season.TEAM_EMOJI = {name: "<:{}:1547614892981354567>".format(code)
+                      for code, name in _season.TEAM_CODES.items()}
+try:
+    split = fixture_board(footer_store.fixtures(week=WEEK), WEEK, slot_for,
+                          gameweek=gw1, deadline=gw1.deadline, mention="@everyone")
+    check("splits into more than one message", len(split) > 1, True)
+    tail = [b for b in split if "SCHEDULING DEADLINE" in b]
+    check("the deadline block lands in exactly one message", len(tail), 1)
+    check("its explanation is in the same message",
+          "Officials set the time" in tail[0], True)
+    check("and so is the timezone note", "your own timezone" in tail[0], True)
+    check("all still within the limit",
+          all(len(b) <= DISCORD_LIMIT for b in split), True)
+finally:
+    _season.TEAM_EMOJI = saved_badges
 
 print("\nthe ping and the TBD placeholder")
 tbd_store = fresh_store()
@@ -329,22 +374,23 @@ check("the old long-dash placeholder is gone", "to be decided" in tbd, False)
 
 pinged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                        gameweek=gw1, deadline=gw1.deadline, mention="@everyone")
-check("the ping is the very first line", pinged[0].splitlines()[0], "@everyone")
+check("the ping is spoilered on the first line",
+      pinged[0].splitlines()[0], "||@everyone||")
 check("it sits above the heading",
-      pinged[0].splitlines()[1].startswith("# PRS"), True)
+      pinged[0].splitlines()[1].startswith("**__PRS"), True)
 check("only the first message carries it",
-      all(not b.startswith("@everyone") for b in pinged[1:]), True)
+      all(not b.startswith("||") for b in pinged[1:]), True)
 quiet = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                       gameweek=gw1, deadline=gw1.deadline, mention=None)
-check("no ping when unset", quiet[0].startswith("#"), True)
+check("no ping when unset", quiet[0].startswith("**__"), True)
 check("a role mention works too",
       fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
-                    mention="<@&123>")[0].splitlines()[0], "<@&123>")
+                    mention="<@&123>")[0].splitlines()[0], "||<@&123>||")
 
 check("a team without a badge falls back to its name",
       _season.label_for("NO SUCH TEAM"), "NO SUCH TEAM")
-check("a team with one is prefixed",
-      _season.label_for("ARSENAL").startswith("<:ARS:"), True)
+check("a team with one shows only the badge",
+      _season.label_for("ARSENAL"), _season.TEAM_EMOJI["ARSENAL"])
 
 # --------------------------------------------------------------------------
 print("")

@@ -24,6 +24,15 @@ from datetime import datetime, time, timedelta, timezone
 
 SEASON = "S17"
 
+# How the season reads in a public post's heading: "PRS SEASON 17 GAMEWEEK 1:".
+SEASON_LABEL = "SEASON 17"
+
+# Optional emoji after the heading and after each division name, the way the
+# league's own posts do it. Upload one named after the league code below (PL,
+# BL, LL, SA, L1) and `python -m bot.sync_emoji --write` picks them up.
+SEASON_EMOJI = ""
+LEAGUE_EMOJI = {}
+
 # No match may start before this. From the league instructions: "You can
 # schedule games to be played from Thursday, 17 September 2026 17:30 onwards".
 KICKOFF_FLOOR = datetime(2026, 9, 17, 17, 30, tzinfo=timezone.utc)
@@ -309,6 +318,17 @@ def league_of(gameweek_key, home_code, away_code):
 
 
 def label_for(team_name):
-    """How a team appears in a public post: its emoji if set, else its name."""
-    emoji = TEAM_EMOJI.get(team_name)
-    return "{} {}".format(emoji, team_name) if emoji else team_name
+    """How a team appears in a public post.
+
+    Just the badge when there is one - the league's posts are two logos and a
+    time, with no names. A team without a badge falls back to its name, since
+    an empty cell would leave the row meaningless.
+    """
+    return TEAM_EMOJI.get(team_name) or team_name
+
+
+def league_label(code):
+    """A division heading: its name, plus its emoji if one is set."""
+    name = LEAGUES.get(code, code)
+    emoji = LEAGUE_EMOJI.get(code)
+    return "{}  {}".format(name, emoji) if emoji else name

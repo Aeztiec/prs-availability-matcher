@@ -56,12 +56,23 @@ def render(matched):
     return "\n".join(lines)
 
 
-def write_into_season(block):
+def render_leagues(matched):
+    """The LEAGUE_EMOJI literal, for badges named after a league code."""
+    lines = ["LEAGUE_EMOJI = {"]
+    for code in season.LEAGUES:
+        if code in matched:
+            lines.append('    "{}": "{}",  # {}'.format(
+                code, matched[code], season.LEAGUES[code]))
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def write_into_season(block, pattern_name="TEAM_EMOJI"):
     with open(SEASON_FILE, encoding="utf-8") as handle:
         text = handle.read()
-    pattern = re.compile(r"^TEAM_EMOJI = \{.*?^\}", re.S | re.M)
+    pattern = re.compile(r"^{} = \{{.*?^\}}".format(pattern_name), re.S | re.M)
     if not pattern.search(text):
-        raise SystemExit("couldn't find the TEAM_EMOJI block in season.py")
+        raise SystemExit("couldn't find the {} block in season.py".format(pattern_name))
     with open(SEASON_FILE, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(pattern.sub(lambda _: block, text, count=1))
     print("Updated {}".format(os.path.relpath(SEASON_FILE)))
@@ -117,6 +128,10 @@ def main(argv=None):
         else:
             missing.append(code)
 
+    # Division badges, matched the same way - an emoji named PL, BL, LL, SA, L1.
+    leagues = {code: by_code[code.upper()]
+               for code in season.LEAGUES if code.upper() in by_code}
+
     print("{} custom emoji in the server, {} matched a team code.".format(
         len(client.found), len(matched)))
     if missing:
@@ -129,13 +144,25 @@ def main(argv=None):
         return 0
 
     block = render(matched)
+    league_block = render_leagues(leagues) if leagues else None
     if "--write" in argv:
         write_into_season(block)
+        if league_block:
+            write_into_season(league_block, "LEAGUE_EMOJI")
+            print("Also wrote {} division badge(s).".format(len(leagues)))
     else:
         print("")
         print("Paste this over TEAM_EMOJI in season.py, or re-run with --write:")
         print("")
         print(block)
+        if league_block:
+            print("")
+            print(league_block)
+    if not leagues:
+        print("")
+        print("-# No division badges found. Upload one named after a league "
+              "code ({}) to get them beside the headings.".format(
+                  ", ".join(season.LEAGUES)))
     return 0
 
 
