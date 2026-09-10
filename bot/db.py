@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS log (
     detail      TEXT
 );
 
+CREATE TABLE IF NOT EXISTS boards (
+    week        TEXT    PRIMARY KEY,
+    channel_id  INTEGER NOT NULL,
+    message_id  INTEGER NOT NULL,
+    digest      TEXT,
+    updated_at  TEXT    NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS ix_fixtures_week   ON fixtures(week, competition);
 CREATE INDEX IF NOT EXISTS ix_fixtures_status ON fixtures(status);
 CREATE INDEX IF NOT EXISTS ix_log_fixture     ON log(fixture_id, id);
@@ -431,3 +439,56 @@ class Store:
             args.append(competition)
         with self._connect() as conn:
             return [dict(r) for r in conn.execute(sql + " ORDER BY f.id", args)]
+
+    # ------------------------------------------------- published fixture board
+    def board(self, week):
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM boards WHERE week=?", (week,)).fetchone()
+        return dict(row) if row else None
+
+    def boards(self):
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute("SELECT * FROM boards ORDER BY week")]
+
+    def set_board(self, week, channel_id, message_id, digest=None):
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO boards (week, channel_id, message_id, digest, updated_at)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(week) DO UPDATE SET
+                       channel_id=excluded.channel_id,
+                       message_id=excluded.message_id,
+                       digest=excluded.digest,
+                       updated_at=excluded.updated_at""",
+                (week, channel_id, message_id, digest, now()),
+            )
+
+    def set_board_digest(self, week, digest):
+        """Remember what was last published, so an unchanged board is not edited.
+
+        The runner wakes every few minutes; without this it would rewrite the
+        same message all day and burn rate limit for nothing.
+        """
+        with self._connect() as conn:
+            conn.execute("UPDATE boards SET digest=?, updated_at=? WHERE week=?",
+                         (digest, now(), week))
+
+    def forget_board(self, week):
+        with self._connect() as conn:
+            conn.execute("DELETE FROM boards WHERE week=?", (week,))
+
+    def unsubmitted_managers(self, fixture_id):
+        """Managers on a fixture who have not pressed submit.
+
+        The dashboard needs names, not a count - "waiting on 1" doesn't tell
+        staff who to chase.
+        """
+        fixture = self.fixture(fixture_id)
+        if not fixture:
+            return []
+        missing = []
+        for manager_id in (fixture["home_manager_id"], fixture["away_manager_id"]):
+            record = self.submission(fixture_id, manager_id)
+            if not record or not record["submitted"]:
+                missing.append(manager_id)
+        return missing

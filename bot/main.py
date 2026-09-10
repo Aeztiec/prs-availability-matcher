@@ -124,6 +124,11 @@ class PRSBot(discord.Client):
             if slot:
                 await self.offer_referee(fixture, slot)
 
+        # Keep any published board in step with what just changed.
+        for record in ([self.store.board(week)] if week else self.store.boards()):
+            if record:
+                await self.refresh_board(record["week"])
+
     def slot(self, key):
         return next((s for s in self.slots if s.key == key), None)
 
@@ -149,6 +154,73 @@ class PRSBot(discord.Client):
             self.store.note(fixture["id"], "referee unreachable",
                             str(candidate.referee_id))
         return None
+
+    # ---------------------------------------------------------- fixture board
+    def board_bodies(self, week):
+        names = {r["discord_id"]: r["name"] for r in self.store.referees(active_only=False)}
+        return notify.fixture_board(
+            self.store.fixtures(week=week), week, self.slot, referee_names=names
+        )
+
+    async def publish_board(self, week, channel):
+        """Post the week's master list and remember where it lives."""
+        bodies = self.board_bodies(week)
+        message = await channel.send(bodies[0])
+        for extra in bodies[1:]:
+            await channel.send(extra)
+        self.store.set_board(week, channel.id, message.id, notify.board_digest(bodies))
+        return message
+
+    async def refresh_board(self, week):
+        """Edit the published board in place, if anything actually changed.
+
+        Skipping unchanged edits matters: the runner wakes every few minutes and
+        would otherwise rewrite the same message all day.
+        """
+        record = self.store.board(week)
+        if not record:
+            return False
+        bodies = self.board_bodies(week)
+        digest = notify.board_digest(bodies)
+        if digest == record.get("digest"):
+            return False
+        try:
+            channel = self.get_channel(record["channel_id"]) or \
+                await self.fetch_channel(record["channel_id"])
+            message = await channel.fetch_message(record["message_id"])
+            await message.edit(content=bodies[0])
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
+            # Deleted or unreachable: forget it rather than retrying forever.
+            log.warning("board for %s unreachable (%s); forgetting it", week, error)
+            self.store.forget_board(week)
+            return False
+        self.store.set_board_digest(week, digest)
+        if len(bodies) > 1:
+            log.info("board for %s needs %d messages; only the first is edited "
+                     "in place - republish with /fixtures publish", week, len(bodies))
+        return True
+
+    def dashboard_context(self, week):
+        """The extra detail step 16 needs: who and why, not just how many."""
+        fixtures = self.store.fixtures(week=week)
+        waiting_on, reasons, asked = {}, {}, {}
+        for fixture in fixtures:
+            fixture_id = fixture["id"]
+            waiting_on[fixture_id] = self.store.unsubmitted_managers(fixture_id)
+            asked[fixture_id] = self.store.refs_already_asked(fixture_id)
+            for entry in reversed(self.store.history(fixture_id)):
+                if entry["event"].startswith("status -> NEEDS_MANUAL") and entry["detail"]:
+                    reasons[fixture_id] = entry["detail"]
+                    break
+        return waiting_on, reasons, asked
+
+    async def show_dashboard(self, interaction, week, followup=False):
+        buckets = dashboard(self.store, week=week)
+        waiting_on, reasons, asked = self.dashboard_context(week)
+        body = notify.dashboard_summary(buckets, week, waiting_on, reasons, asked)
+        sender = interaction.followup.send if followup else \
+            interaction.response.send_message
+        await sender(body, ephemeral=True)
 
     @tasks.loop(minutes=TICK_MINUTES)
     async def runner(self):
@@ -304,11 +376,7 @@ def register(bot):
     @app_commands.describe(week="Saturday of the weekend, YYYY-MM-DD. Defaults to the next one.")
     @staff_only()
     async def fixture_list(interaction, week: str = None):
-        week = week or week_of(utcnow())
-        buckets = dashboard(store, week=week)
-        await interaction.response.send_message(
-            notify.dashboard_summary(buckets, week), ephemeral=True
-        )
+        await bot.show_dashboard(interaction, week or week_of(utcnow()))
 
     @fixture_group.command(name="show", description="One fixture, with its scheduling log")
     @staff_only()
@@ -330,10 +398,7 @@ def register(bot):
     async def fixture_run(interaction, week: str = None):
         await interaction.response.defer(ephemeral=True)
         await bot.process(week=week)
-        buckets = dashboard(store, week=week or week_of(utcnow()))
-        await interaction.followup.send(
-            notify.dashboard_summary(buckets, week or week_of(utcnow())), ephemeral=True
-        )
+        await bot.show_dashboard(interaction, week or week_of(utcnow()), followup=True)
 
     @fixture_group.command(name="set", description="Set a kickoff time by hand")
     @app_commands.describe(slot="Slot key, e.g. sat_1800")
@@ -439,6 +504,47 @@ def register(bot):
             return
         week = week or week_of(utcnow())
         await open_selector(interaction, store, Target(SCOPE_REF_WEEK, week), bot.slots)
+
+    @fixture_group.command(name="publish",
+                           description="Post the week's fixture list in this channel")
+    @app_commands.describe(week="Saturday of the weekend, YYYY-MM-DD. Defaults to the next one.")
+    @staff_only()
+    async def fixture_publish(interaction, week: str = None):
+        week = week or week_of(utcnow())
+        await interaction.response.defer(ephemeral=True)
+        existing = store.board(week)
+        try:
+            message = await bot.publish_board(week, interaction.channel)
+        except (discord.Forbidden, discord.HTTPException) as error:
+            await interaction.followup.send(
+                "Couldn't post here: {}".format(error), ephemeral=True
+            )
+            return
+        note = ""
+        if existing:
+            note = ("\n-# The previous board for this week is no longer updated - "
+                    "delete it if you don't want it lying around.")
+        await interaction.followup.send(
+            "Published the week of {} here. It'll update itself as fixtures "
+            "change.{}".format(week, note),
+            ephemeral=True,
+        )
+
+    @fixture_group.command(name="unpublish", description="Stop updating this week's board")
+    @staff_only()
+    async def fixture_unpublish(interaction, week: str = None):
+        week = week or week_of(utcnow())
+        if not store.board(week):
+            await interaction.response.send_message(
+                "No board published for the week of {}.".format(week), ephemeral=True
+            )
+            return
+        store.forget_board(week)
+        await interaction.response.send_message(
+            "Stopped updating the board for {}. The message is still there; "
+            "delete it by hand if you want it gone.".format(week),
+            ephemeral=True,
+        )
 
     tree.add_command(fixture_group)
     tree.add_command(refs_group)
