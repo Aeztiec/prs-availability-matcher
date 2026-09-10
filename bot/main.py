@@ -538,13 +538,9 @@ def register(bot):
             )
             return
         if len(mine) > 1:
-            listing = "\n".join(
-                "· **#{}** {} vs {}".format(f["id"], f["home_team"], f["away_team"])
-                for f in mine
-            )
             await interaction.response.send_message(
-                "You have a few open. Pick one with `/availability fixture:<number>`:"
-                "\n\n" + listing,
+                "You have more than one fixture open. Run the command under "
+                "the one you want to set:\n\n" + notify.fixture_picker(mine),
                 ephemeral=True,
             )
             return
@@ -552,7 +548,7 @@ def register(bot):
                             bot.offerable_slots(mine[0]["gameweek"]))
 
     # ------------------------------------------------------------- fixtures
-    @fixture_group.command(name="create", description="Create a fixture and DM both managers")
+    @fixture_group.command(name="create", description="Create a fixture and post it here")
     @app_commands.describe(
         home="Home team, as named in the timings sheet",
         away="Away team, as named in the timings sheet",

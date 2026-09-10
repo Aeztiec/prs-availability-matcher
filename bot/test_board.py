@@ -18,6 +18,7 @@ import tempfile
 from bot.db import Store
 from bot.notify import (
     BOARD_CHUNK, board_digest, board_row, dashboard_summary, fixture_board,
+    fixture_picker,
 )
 from bot.orchestrator import dashboard
 from bot.scheduling import Source, Status
@@ -393,6 +394,45 @@ check("a team without a badge falls back to its name",
       _season.label_for("NO SUCH TEAM"), "NO SUCH TEAM")
 check("a team with one shows only the badge",
       _season.label_for("ARSENAL"), _season.TEAM_EMOJI["ARSENAL"])
+
+# --------------------------------------------------------------------------
+print("\nthe fixture picker, shown when a manager has more than one game open")
+# --------------------------------------------------------------------------
+picker_store = fresh_store()
+picker_ids = []
+for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"][:6]):
+    fid = picker_store.create_fixture(
+        "S17_Clubs", WEEK, _season.team_name(h), _season.team_name(a),
+        900 + n, 901 + n, "2026-09-11T18:00:00Z",
+        Status.WAITING_FOR_AVAILABILITY, league=lg,
+    )
+    picker_ids.append(fid)
+
+picker = fixture_picker(picker_store.fixtures(week=WEEK))
+check("grouped by division, like the announcement",
+      "**__Premier League:__**" in picker and "**__Bundesliga:__**" in picker, True)
+check("uses the same vs style as the announcement", " *vs* " in picker, True)
+check("gives the command for each fixture",
+      all("`/availability fixture:{}`".format(fid) in picker for fid in picker_ids),
+      True)
+check("no plain bullet points left over from the old format", "· **" not in picker, True)
+check("divisions in the same fixed order as the announcement",
+      picker.index("Premier League:") < picker.index("Bundesliga:"), True)
+
+print("\na single fixture still renders correctly")
+solo = fixture_picker(picker_store.fixtures(week=WEEK)[:1])
+check("one row, one division heading", solo.count("*vs*"), 1)
+
+print("\nan empty list produces an empty string rather than a stray heading")
+check("nothing to show", fixture_picker([]), "")
+
+print("\na fixture with no league falls back to a catch-all group")
+loose = picker_store.create_fixture(
+    "S17_Clubs", WEEK, "TEAM Z FC", "TEAM Y FC", 950, 951,
+    "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY,
+)
+leagueless = fixture_picker([picker_store.fixture(loose)])
+check("still lists the fixture", "TEAM Z FC" in leagueless, True)
 
 # --------------------------------------------------------------------------
 print("")

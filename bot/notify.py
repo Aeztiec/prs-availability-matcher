@@ -342,6 +342,37 @@ def board_digest(bodies):
     return hashlib.sha256("\n".join(bodies).encode("utf-8")).hexdigest()[:16]
 
 
+def fixture_picker(fixtures):
+    """A grouped, badged list of fixtures to choose between.
+
+    Shared by /availability and the public "Submit my timings" button, so a
+    manager sees the same formatting for "which of your games do you mean"
+    wherever they run into it, rather than each entry point inventing its own
+    plain bullet list. Rows use the same badges and division grouping as the
+    fixture board itself.
+    """
+    by_league = {}
+    for fixture in fixtures:
+        key = fixture.get("league") or "??"
+        by_league.setdefault(key, []).append(fixture)
+
+    lines = []
+    order = list(season.LEAGUES) + sorted(k for k in by_league if k not in season.LEAGUES)
+    for key in order:
+        rows = by_league.get(key)
+        if not rows:
+            continue
+        lines.append("**__{}:__**".format(season.LEAGUES.get(key, key)))
+        for fixture in rows:
+            home = season.label_for(fixture["home_team"])
+            away = season.label_for(fixture["away_team"])
+            lines.append("{} *vs* {} · `/availability fixture:{}`".format(
+                home, away, fixture["id"]))
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
 # --------------------------------------------------------------------------
 # the staff dashboard (spec step 16)
 # --------------------------------------------------------------------------

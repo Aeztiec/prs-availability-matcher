@@ -17,6 +17,7 @@ import re
 
 import discord
 
+from . import notify
 from .selector import SelectorState, describe_choice
 
 # --------------------------------------------------------------------------
@@ -445,13 +446,9 @@ class MyAvailabilityButton(
             return
 
         if len(mine) > 1:
-            listing = "\n".join(
-                "· **{}** v **{}**: `/availability fixture:{}`".format(
-                    f["home_team"], f["away_team"], f["id"])
-                for f in mine
-            )
             await interaction.response.send_message(
-                "You have more than one game open. Pick one:\n\n" + listing,
+                "You have more than one fixture open. Run the command under "
+                "the one you want to set:\n\n" + notify.fixture_picker(mine),
                 ephemeral=True,
             )
             return
