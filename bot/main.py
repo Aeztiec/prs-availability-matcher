@@ -256,14 +256,15 @@ class PRSBot(discord.Client):
             if slot_datetime(gw.week, slot) >= season.KICKOFF_FLOOR
         ]
 
-    async def create_gameweek_fixtures(self, gw, manager_of, opened_by=None):
+    async def create_gameweek_fixtures(self, gw, manager_of, opened_by=None, limit=None):
         """Create every fixture in a gameweek and DM both managers.
 
         Idempotent: a pairing that already exists is skipped, so running this
         twice does not duplicate fixtures or spam twenty people again.
         """
         made, skipped, unreachable = [], [], []
-        for home_code, away_code, league in gw.fixtures:
+        wanted = gw.fixtures[:limit] if limit else gw.fixtures
+        for home_code, away_code, league in wanted:
             home = season.team_name(home_code)
             away = season.team_name(away_code)
             if self.store.fixture_for(gw.key, home, away):
@@ -732,9 +733,12 @@ def register(bot):
 
     @gw_group.command(name="open",
                       description="Create a gameweek's fixtures and DM every manager")
-    @app_commands.describe(gameweek="e.g. GW2")
+    @app_commands.describe(
+        gameweek="e.g. GW2",
+        count="Only create the first N fixtures. For testing; default is all 20.",
+    )
     @staff_only()
-    async def gw_open(interaction, gameweek: str):
+    async def gw_open(interaction, gameweek: str, count: int = None):
         await interaction.response.defer(ephemeral=True)
         try:
             gw = season.gameweek(gameweek)
@@ -769,10 +773,14 @@ def register(bot):
 
         store.open_gameweek(gw.key, interaction.user.id)
         made, skipped, unreachable = await bot.create_gameweek_fixtures(
-            gw, manager_of, opened_by=interaction.user.id
+            gw, manager_of, opened_by=interaction.user.id, limit=count
         )
         parts = ["Opened **{}** — {} fixture(s) created, deadline {}.".format(
             gw.key, len(made), gw.deadline.strftime("%a %d %b %H:%M UTC"))]
+        if count:
+            parts.append("-# Limited to the first {} of {} fixtures. Run again "
+                         "without `count` to create the rest.".format(
+                             count, len(gw.fixtures)))
         if skipped:
             parts.append("Skipped {}: {}".format(len(skipped), ", ".join(skipped[:8])))
         if unreachable:
