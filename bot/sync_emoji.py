@@ -67,6 +67,21 @@ def render_leagues(matched):
     return "\n".join(lines)
 
 
+def write_season_emoji(value):
+    """Set SEASON_EMOJI, or clear it if that badge is gone from the server."""
+    with open(SEASON_FILE, encoding="utf-8") as handle:
+        text = handle.read()
+    pattern = re.compile(r'^SEASON_EMOJI = ".*?"$', re.M)
+    if not pattern.search(text):
+        return False
+    updated = pattern.sub('SEASON_EMOJI = "{}"'.format(value), text, count=1)
+    if updated == text:
+        return False
+    with open(SEASON_FILE, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(updated)
+    return True
+
+
 def write_into_season(block, pattern_name="TEAM_EMOJI"):
     with open(SEASON_FILE, encoding="utf-8") as handle:
         text = handle.read()
@@ -170,25 +185,43 @@ def main(argv=None):
     if not matched:
         return 0
 
+    # Both blocks are always written, even when empty. Writing only what
+    # matched left stale entries behind: deleting a badge from the server -
+    # which happens the moment the 50-emoji cap bites - left season.py
+    # pointing at an id that no longer exists, and Discord renders a dead id
+    # as raw text rather than nothing.
     block = render(matched)
-    league_block = render_leagues(leagues) if leagues else None
+    league_block = render_leagues(leagues)
+    prs = by_code.get("PRS", "")
+
     if "--write" in argv:
         write_into_season(block)
-        if league_block:
-            write_into_season(league_block, "LEAGUE_EMOJI")
-            print("Also wrote {} division badge(s).".format(len(leagues)))
+        write_into_season(league_block, "LEAGUE_EMOJI")
+        if write_season_emoji(prs):
+            print("SEASON_EMOJI {}.".format("set" if prs else "cleared"))
+        dropped = [t for t in season.TEAM_EMOJI if t not in matched]
+        stale_leagues = [c for c in season.LEAGUE_EMOJI if c not in leagues]
+        if dropped or stale_leagues:
+            print("Dropped {} stale badge(s) whose emoji no longer exist: {}".format(
+                len(dropped) + len(stale_leagues),
+                ", ".join(sorted(stale_leagues) + sorted(dropped)[:6])))
+        print("Now: {} team badge(s), {} division badge(s).".format(
+            len(matched), len(leagues)))
     else:
         print("")
-        print("Paste this over TEAM_EMOJI in season.py, or re-run with --write:")
+        print("Paste these over the blocks in season.py, or re-run with --write:")
         print("")
         print(block)
-        if league_block:
-            print("")
-            print(league_block)
+        print("")
+        print(league_block)
+        print("")
+        print('SEASON_EMOJI = "{}"'.format(prs))
+
     if not leagues:
         print("")
-        print("-# No division badges found. Upload one named after a league "
-              "code ({}) to get them beside the headings.".format(
+        print("-# No division badges on the server. Headings will render "
+              "without one, which is fine - upload an emoji named after a "
+              "league code ({}) if you want them back.".format(
                   ", ".join(season.LEAGUES)))
     return 0
 

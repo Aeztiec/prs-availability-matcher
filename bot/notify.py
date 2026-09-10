@@ -218,7 +218,7 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
         parts.append(competition.upper())
     parts.append((gameweek.label if gameweek else "FIXTURES").upper())
     header = "**__{}:__**".format(" ".join(parts))
-    if season.SEASON_EMOJI:
+    if season.usable_emoji(season.SEASON_EMOJI):
         header = "{}  {}".format(header, season.SEASON_EMOJI)
 
     # The ping sits above the heading in a spoiler: it still notifies, but
@@ -231,9 +231,15 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
         rows = by_league.get(key)
         if not rows:
             continue
-        lines.append("**__{}:__**  {}".format(
-            season.LEAGUES.get(key, key), season.LEAGUE_EMOJI.get(key, "")
-        ).rstrip())
+        # The badge goes after the colon, and only if it is a usable
+        # custom-emoji reference. A division with none - or with a stale id
+        # left behind after its emoji was deleted - just renders its name;
+        # Discord prints a dead reference as raw text otherwise.
+        division = "**__{}:__**".format(season.LEAGUES.get(key, key))
+        badge = season.LEAGUE_EMOJI.get(key)
+        if season.usable_emoji(badge):
+            division = "{}  {}".format(division, badge)
+        lines.append(division)
 
 
         def sort_key(fixture):

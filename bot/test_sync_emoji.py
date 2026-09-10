@@ -144,11 +144,48 @@ print("\nthe real season.py is intact and complete")
 check("gameweeks", len(season.GAMEWEEKS), 10)
 check("team codes", len(season.TEAM_CODES), 40)
 check("fixture lists", len(season.FIXTURES), 7)
-check("all five divisions have a badge", len(season.LEAGUE_EMOJI), 5)
-check("badges point at real ids",
-      all(v.startswith("<:") and v.endswith(">") for v in season.LEAGUE_EMOJI.values()),
-      True)
-check("the season badge is set", season.SEASON_EMOJI.startswith("<:PRS:"), True)
+# Badges are optional and come and go as emoji are uploaded or deleted -
+# Discord caps a server at 50, so the divisions get dropped to make room for
+# forty clubs. Assert only that whatever is present is valid, never a count.
+check("every division badge present is a real reference",
+      [c for c, e in season.LEAGUE_EMOJI.items() if not season.usable_emoji(e)], [])
+check("no division is listed that isn't a real division",
+      [c for c in season.LEAGUE_EMOJI if c not in season.LEAGUES], [])
+
+
+# --------------------------------------------------------------------------
+print("")
+print("badges that no longer exist are treated as absent")
+# --------------------------------------------------------------------------
+check("a real reference is usable",
+      season.usable_emoji("<:ARS:1547634005745344554>"), True)
+check("blank is not", season.usable_emoji(""), False)
+check("None is not", season.usable_emoji(None), False)
+check("a bare shortcode is not - a bot cannot resolve one",
+      season.usable_emoji(":ARS:"), False)
+check("a stray word is not", season.usable_emoji("ARS"), False)
+
+saved_team = dict(season.TEAM_EMOJI)
+saved_league = dict(season.LEAGUE_EMOJI)
+try:
+    season.TEAM_EMOJI = {"ARSENAL": ":ARS:", "CHELSEA": ""}
+    check("an unresolvable badge falls back to the name",
+          season.label_for("ARSENAL"), "ARSENAL")
+    check("a blank badge falls back too", season.label_for("CHELSEA"), "CHELSEA")
+    season.TEAM_EMOJI = {"ARSENAL": "<:ARS:1>"}
+    check("a usable badge is used", season.label_for("ARSENAL"), "<:ARS:1>")
+finally:
+    season.TEAM_EMOJI = saved_team
+    season.LEAGUE_EMOJI = saved_league
+
+print("")
+print("the real season.py holds only usable references")
+bad_teams = [t for t, e in season.TEAM_EMOJI.items() if not season.usable_emoji(e)]
+bad_leagues = [c for c, e in season.LEAGUE_EMOJI.items() if not season.usable_emoji(e)]
+check("no unusable team badges", bad_teams, [])
+check("no unusable division badges", bad_leagues, [])
+check("the season badge is either usable or empty",
+      season.SEASON_EMOJI == "" or season.usable_emoji(season.SEASON_EMOJI), True)
 
 # --------------------------------------------------------------------------
 print("")

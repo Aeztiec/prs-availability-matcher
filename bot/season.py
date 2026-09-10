@@ -30,13 +30,8 @@ SEASON_LABEL = "SEASON 17"
 # Optional emoji after the heading and after each division name, the way the
 # league's own posts do it. Upload one named after the league code below (PL,
 # BL, LL, SA, L1) and `python -m bot.sync_emoji --write` picks them up.
-SEASON_EMOJI = "<:PRS:1547631713444962304>"
+SEASON_EMOJI = ""
 LEAGUE_EMOJI = {
-    "PL": "<:PL:1547631688253833367>",  # Premier League
-    "BL": "<:BL:1547631650203107398>",  # Bundesliga
-    "LL": "<:LL:1547631605693292615>",  # La Liga
-    "SA": "<:SA:1547631585225080944>",  # Serie A
-    "L1": "<:L1:1547631556351234128>",  # Ligue 1
 }
 
 # No match may start before this. From the league instructions: "You can
@@ -132,14 +127,50 @@ TEAM_CODES = {
 # TEAM_CODES above, then run  python -m bot.sync_emoji  to pick them up.
 TEAM_EMOJI = {
     # Premier League
-    "ARSENAL": "<:ARS:1547614892981354567>",
-    "ASTON VILLA": "<:AST:1547614917996191844>",
-    "CHELSEA": "<:CHE:1547614945078681710>",
-    "LIVERPOOL": "<:LIV:1547614968994861116>",
-    "MANCHESTER CITY": "<:MCI:1547615023486996550>",
-    "MANCHESTER UNITED": "<:MUN:1547614992956915732>",
-    "NEWCASTLE UNITED": "<:NEW:1547615042554437662>",
-    "TOTTENHAM HOTSPUR": "<:TOT:1547615066755432558>",
+    "ARSENAL": "<:ARS:1547634005745344554>",
+    "ASTON VILLA": "<:AST:1547634141615366214>",
+    "CHELSEA": "<:CHE:1547634215443763302>",
+    "LIVERPOOL": "<:LIV:1547634278370775050>",
+    "MANCHESTER CITY": "<:MCI:1547634427977400470>",
+    "MANCHESTER UNITED": "<:MUN:1547634355944292454>",
+    "NEWCASTLE UNITED": "<:NEW:1547634516401848341>",
+    "TOTTENHAM HOTSPUR": "<:TOT:1547634590468804738>",
+    # Bundesliga
+    "BAYER LEVERKUSEN": "<:B04:1547634741824458902>",
+    "BAYERN MUNICH": "<:BAY:1547634685394554921>",
+    "BORUSSIA DORTMUND": "<:BVB:1547634804168855562>",
+    "EINTRACHT FRANKFURT": "<:FRA:1547635238522327242>",
+    "FREIBURG": "<:SCF:1547635165092651060>",
+    "RED BULL LEIPZIG": "<:RBL:1547635435701010462>",
+    "SCHALKE 04": "<:S04:1547635300455415828>",
+    "STUTTGART": "<:VFB:1547635524167147662>",
+    # La Liga
+    "ATLÉTICO MADRID": "<:ATM:1547635894515933214>",
+    "BARCELONA": "<:FCB:1547635947804303460>",
+    "REAL BETIS": "<:BET:1547636036543193209>",
+    "REAL MADRID": "<:RMA:1547636173130702888>",
+    "REAL SOCIEDAD": "<:RSO:1547636231926718535>",
+    "SEVILLA": "<:SEV:1547635623580672140>",
+    "VALENCIA": "<:VAL:1547636292022566962>",
+    "VILLARREAL": "<:VIL:1547636346787467465>",
+    # Serie A
+    "AC MILAN": "<:ACM:1547636419072106496>",
+    "AS ROMA": "<:ROM:1547636562571825194>",
+    "ATALANTA": "<:ATA:1547636860216672266>",
+    "COMO": "<:COM:1547636501997949038>",
+    "INTER MILAN": "<:INT:1547636622944772177>",
+    "JUVENTUS": "<:JUV:1547636678670418111>",
+    "LAZIO": "<:LAZ:1547636749818138676>",
+    "NAPOLI": "<:NAP:1547636798753083472>",
+    # Ligue 1
+    "AS MONACO": "<:ASM:1547637634006917171>",
+    "LOSC LILLE": "<:LIL:1547637312362520596>",
+    "OGC NICE": "<:OGC:1547637804375478403>",
+    "OLYMPIQUE DE MARSEILLE": "<:OLM:1547637582341611620>",
+    "OLYMPIQUE LYONNAIS": "<:OLL:1547637227675459634>",
+    "PARIS SAINT-GERMAIN": "<:PSG:1547636925576257654>",
+    "RC LENS": "<:RCL:1547637516474257549>",
+    "STRASBOURG": "<:RCS:1547637703200342079>",
 }
 
 LEAGUES = {
@@ -323,18 +354,23 @@ def league_of(gameweek_key, home_code, away_code):
     return None
 
 
+def usable_emoji(emoji):
+    """True if this looks like a real custom-emoji reference.
+
+    Anything else - blank, a bare ":NAME:" shortcode a bot cannot resolve, or
+    an id whose emoji has since been deleted - is treated as absent and not
+    rendered. A badge that is present but wrong is worse than none at all:
+    Discord prints a dead reference as raw text in the middle of the post.
+    """
+    return bool(emoji) and emoji.startswith("<") and emoji.endswith(">")
+
+
 def label_for(team_name):
     """How a team appears in a public post.
 
-    Just the badge when there is one - the league's posts are two logos and a
-    time, with no names. A team without a badge falls back to its name, since
-    an empty cell would leave the row meaningless.
+    Just the badge when there is a usable one - the league's posts are two
+    logos and a time, with no names. A team with no badge falls back to its
+    name, since an empty side would leave the row meaningless.
     """
-    return TEAM_EMOJI.get(team_name) or team_name
-
-
-def league_label(code):
-    """A division heading: its name, plus its emoji if one is set."""
-    name = LEAGUES.get(code, code)
-    emoji = LEAGUE_EMOJI.get(code)
-    return "{}  {}".format(name, emoji) if emoji else name
+    emoji = TEAM_EMOJI.get(team_name)
+    return emoji if usable_emoji(emoji) else team_name
