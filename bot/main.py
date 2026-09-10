@@ -55,6 +55,7 @@ class PRSBot(discord.Client):
         # be resolved, and the check would silently fail open or closed.
         super().__init__(intents=discord.Intents(guilds=True))
         self.tree = app_commands.CommandTree(self)
+        self.tree.on_error = self.on_tree_error
         self.store = Store()
         self.timings = None
         self.slots = []
@@ -118,6 +119,27 @@ class PRSBot(discord.Client):
 
     async def on_ready(self):
         log.info("logged in as %s (%s)", self.user, self.user.id)
+
+    async def on_tree_error(self, interaction, error):
+        """Keep expected refusals out of the log, and never leave a command
+        silently unanswered."""
+        if isinstance(error, app_commands.CheckFailure):
+            # staff_only() has already explained itself to the user.
+            log.info("refused %s for %s",
+                     interaction.command.qualified_name if interaction.command else "?",
+                     interaction.user)
+            return
+        log.exception("command %s failed",
+                      interaction.command.qualified_name if interaction.command else "?")
+        message = ("Something went wrong running that. It's been logged - "
+                   "tell staff what you were doing.")
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
 
     # ------------------------------------------------------------ messaging
     async def dm(self, user_id, content, view=None):
@@ -356,18 +378,35 @@ class PRSBot(discord.Client):
 # --------------------------------------------------------------------------
 
 def is_staff(interaction):
-    """Staff role if configured, otherwise anyone who can manage the server.
-
-    interaction.permissions comes from the interaction payload rather than the
-    member cache, so it is trustworthy even for a guild the bot has not cached.
-    """
+    """Staff role if configured, otherwise anyone who can manage the server."""
+    if interaction.guild is None:
+        # Commands are registered globally so /availability works in DMs, which
+        # means the staff ones are offered there too. There is no role or
+        # permission to check in a DM, so they simply do not apply.
+        return False
+    if interaction.guild.owner_id == interaction.user.id:
+        return True
     if config.STAFF_ROLE_ID:
         role_ids = {r.id for r in getattr(interaction.user, "roles", []) or []}
         return config.STAFF_ROLE_ID in role_ids
     try:
-        return bool(interaction.permissions.manage_guild)
+        perms = interaction.permissions
+        return bool(perms.manage_guild or perms.administrator)
     except AttributeError:
         return False
+
+
+def staff_refusal(interaction):
+    """Why a staff command was refused, phrased so it can be acted on."""
+    if interaction.guild is None:
+        return ("Staff commands only work in the server, not in DMs — Discord "
+                "gives me no roles or permissions to check here.\n"
+                "-# `/availability` and `/refs availability` do work in DMs.")
+    if config.STAFF_ROLE_ID:
+        return ("That's a staff command — it needs the configured staff role "
+                "(`DISCORD_STAFF_ROLE_ID`).")
+    return ("That's a staff command — it needs **Manage Server**, or set "
+            "`DISCORD_STAFF_ROLE_ID` in .env to gate by role instead.")
 
 
 def staff_only():
@@ -375,7 +414,7 @@ def staff_only():
         if is_staff(interaction):
             return True
         await interaction.response.send_message(
-            "That's a staff command.", ephemeral=True
+            staff_refusal(interaction), ephemeral=True
         )
         return False
     return app_commands.check(predicate)
