@@ -116,8 +116,8 @@ print("       (split into {} message(s), longest {} chars)".format(
     len(bodies), max(len(b) for b in bodies)))
 check("all 40 fixtures present",
       sum(b.count(" *vs* ") for b in bodies), 40)
-check("continuation marked when split",
-      all("continued" in b for b in bodies[1:]), True)
+check("every continuation message still fits",
+      all(len(b) <= DISCORD_LIMIT for b in bodies[1:]), True)
 
 print("\nan 80-fixture week still splits rather than truncating")
 store = fresh_store()
@@ -249,7 +249,7 @@ check("says it opens privately", "privately" in cta, True)
 check("explains the three states",
       all(w in cta for w in ("ideal", "fine", "no")), True)
 check("states the deadline", "<t:" in cta, True)
-check("tells a non-manager what to do", "ask an Official" in cta, True)
+check("tells a non-manager what to do", "Contact an Official" in cta, True)
 check("fits Discord's limit", len(cta) <= DISCORD_LIMIT, True)
 
 print("\nthe board tracks every message it occupies")

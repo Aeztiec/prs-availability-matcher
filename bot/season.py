@@ -43,10 +43,10 @@ LEAGUE_EMOJI = {
 # schedule games to be played from Thursday, 17 September 2026 17:30 onwards".
 KICKOFF_FLOOR = datetime(2026, 9, 17, 17, 30, tzinfo=timezone.utc)
 
-# The deadline is the Wednesday before a gameweek's Friday. End of that day, so
+# The deadline is the start of Thursday, i.e. the moment Wednesday ends. So
 # "by Wednesday" means the whole of Wednesday is still in play.
-DEADLINE_WEEKDAY_OFFSET = -2          # Friday - 2 = Wednesday
-DEADLINE_TIME = time(23, 59, tzinfo=timezone.utc)
+DEADLINE_WEEKDAY_OFFSET = -1          # Friday - 1 = Thursday
+DEADLINE_TIME = time(0, 0, tzinfo=timezone.utc)
 
 # How many gameweeks past the current one managers may schedule into. The
 # league allows two, but only with an Officials' unlock - so the default is

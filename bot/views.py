@@ -110,7 +110,7 @@ class Target:
 # rendering
 # --------------------------------------------------------------------------
 
-LEGEND = "⚪ no  ·  🟡 fine  ·  🟢 ideal — click a time to cycle it"
+LEGEND = "⚪ no  ·  🟡 fine  ·  🟢 ideal (click a time to cycle it)"
 
 
 def build_message(store, target, state, active_day=None):
@@ -125,7 +125,7 @@ def build_message(store, target, state, active_day=None):
     ]
     lines += state.summary_lines()
     if state.submitted:
-        lines += ["", "✅ Submitted — you can still change it until the deadline."]
+        lines += ["", "✅ Submitted. You can still change it until the deadline."]
     return "\n".join(lines), active_day
 
 
@@ -431,7 +431,7 @@ class MyAvailabilityButton(
                        if uid == interaction.user.id]
             if not managed:
                 await interaction.response.send_message(
-                    "You're not registered as a manager yet — ask an Official "
+                    "You're not registered as a manager yet. Ask an Official "
                     "to add you with `/managers set`.",
                     ephemeral=True,
                 )
@@ -446,7 +446,7 @@ class MyAvailabilityButton(
 
         if len(mine) > 1:
             listing = "\n".join(
-                "· **{}** v **{}**  — `/availability fixture:{}`".format(
+                "· **{}** v **{}**: `/availability fixture:{}`".format(
                     f["home_team"], f["away_team"], f["id"])
                 for f in mine
             )

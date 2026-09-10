@@ -18,6 +18,7 @@ import os
 import random
 import sys
 import tempfile
+from datetime import timedelta
 
 import availability as av
 
@@ -108,7 +109,7 @@ rule("SETUP  ·  what staff does once")
 say("")
 say("    Competition   : {}".format(timings.title))
 say("    Gameweek      : {} — plays {}".format(gw.key, gw.friday.strftime("%a %d %b")))
-say("    Deadline      : {} (the Wednesday before)".format(
+say("    Deadline      : {} (Wednesday's close)".format(
     gw.deadline.strftime("%a %d %b %H:%M UTC")))
 say("    Slots offered : {} across {}".format(
     len(timings.slots), ", ".join(sorted({s.day for s in timings.slots}))))
@@ -210,8 +211,8 @@ say("    {} submits. {} never replies.".format(home2, away2))
 submit(fid2, MANAGERS[home2], {"sun_2200": Pref.IDEAL})
 
 before = advance(store, timings, store.fixture(fid2),
-                 now=gw.deadline.replace(hour=9), rng=RNG)
-say("    Before Wednesday  -> {} ({})".format(before.action, before.detail))
+                 now=gw.deadline - timedelta(hours=15), rng=RNG)
+say("    Before the deadline  -> {} ({})".format(before.action, before.detail))
 expect("waits, does not schedule early", before.action, Action.WAIT)
 
 fixture = store.fixture(fid2)
@@ -219,9 +220,9 @@ show_dm("{} manager".format(away2),
         notify.reminder(fixture, fixture["deadline"], "2h"))
 
 after = advance(store, timings, store.fixture(fid2),
-                now=gw.deadline.replace(hour=23, minute=59), rng=RNG)
+                now=gw.deadline + timedelta(minutes=1), rng=RNG)
 say("")
-say("    Wednesday passes  -> {}".format(after.action))
+say("    Deadline passes  -> {}".format(after.action))
 say("    {}".format(after.detail))
 expect("falls back to the timings sheet", after.decision.source, Source.AUTO_FALLBACK)
 expect("did NOT just take the one reply's pick",
@@ -241,7 +242,7 @@ say("    {} vs {}   fixture #{}".format(home3, away3, fid3))
 say("    Neither manager replies, and {} has nothing on the timings sheet.".format(away3))
 
 stuck = advance(store, timings, store.fixture(fid3),
-                now=gw.deadline.replace(hour=23, minute=59), rng=RNG)
+                now=gw.deadline + timedelta(minutes=1), rng=RNG)
 say("")
 say("    -> {}".format(stuck.action))
 say("    {}".format(stuck.detail))

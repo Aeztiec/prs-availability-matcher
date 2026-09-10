@@ -50,10 +50,10 @@ check("every schedule date is a Friday",
 check("gameweeks are a week apart",
       {(season.ALL[i + 1].friday - season.ALL[i].friday).days for i in range(6)}, {7})
 
-print("\ndeadlines land on the Wednesday before, end of day")
-check("GW1 deadline", season.gameweek("GW1").deadline, utc(2026, 9, 16, 23, 59))
-check("every deadline is a Wednesday",
-      {gw.deadline.strftime("%A") for gw in season.ALL}, {"Wednesday"})
+print("\ndeadlines land at the start of Thursday, the moment Wednesday ends")
+check("GW1 deadline", season.gameweek("GW1").deadline, utc(2026, 9, 17, 0, 0))
+check("every deadline is a Thursday",
+      {gw.deadline.strftime("%A") for gw in season.ALL}, {"Thursday"})
 check("a deadline is always before its gameweek",
       all(gw.deadline < gw.friday for gw in season.ALL), True)
 

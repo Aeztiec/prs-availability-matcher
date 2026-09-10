@@ -489,13 +489,13 @@ def is_staff(interaction):
 def staff_refusal(interaction):
     """Why a staff command was refused, phrased so it can be acted on."""
     if interaction.guild is None:
-        return ("Staff commands only work in the server, not in DMs — Discord "
+        return ("Staff commands only work in the server, not in DMs. Discord "
                 "gives me no roles or permissions to check here.\n"
                 "-# `/availability` and `/refs availability` do work in DMs.")
     if config.STAFF_ROLE_ID:
-        return ("That's a staff command — it needs the configured staff role "
+        return ("That's a staff command. It needs the configured staff role "
                 "(`DISCORD_STAFF_ROLE_ID`).")
-    return ("That's a staff command — it needs **Manage Server**, or set "
+    return ("That's a staff command. It needs **Manage Server**, or set "
             "`DISCORD_STAFF_ROLE_ID` in .env to gate by role instead.")
 
 
@@ -608,11 +608,11 @@ def register(bot):
             view=opener(Target(SCOPE_FIXTURE, fixture_id)),
         )
         await interaction.followup.send(
-            "Created **#{}** — {} vs {}, deadline {}.\n{}".format(
+            "Created **#{}**: {} vs {}, deadline {}.\n{}".format(
                 fixture_id, resolved["home"], resolved["away"],
                 when.strftime("%a %d %b %H:%M UTC"),
                 "Posted here with a submit button."
-                if posted else "⚠️ Couldn't post here — check my permissions.",
+                if posted else "⚠️ Couldn't post here. Check my permissions.",
             ),
             ephemeral=True,
         )
@@ -702,10 +702,10 @@ def register(bot):
                 "No referees registered. Add one with `/refs add`.", ephemeral=True
             )
             return
-        lines = ["**Referees — week of {}**".format(week), ""]
+        lines = ["**Referees: week of {}**".format(week), ""]
         for ref in rows:
             got = store.ref_availability(ref["discord_id"], week)
-            lines.append("· <@{}> — {} game(s){}".format(
+            lines.append("· <@{}>: {} game(s){}".format(
                 ref["discord_id"], workload.get(ref["discord_id"], 0),
                 "" if (got and got["submitted"]) else "  ⚠️ no availability submitted",
             ))
@@ -813,7 +813,7 @@ def register(bot):
             count = len(store.fixtures(gameweek=gw.key))
             if count:
                 marks.append("{} created".format(count))
-            lines.append("`{:<4}` {} — plays {}, deadline {}{}".format(
+            lines.append("`{:<4}` {}: plays {}, deadline {}{}".format(
                 gw.key, gw.label, gw.friday.strftime("%a %d %b"),
                 gw.deadline.strftime("%a %d %b"),
                 "  · " + ", ".join(marks) if marks else "",
@@ -823,7 +823,7 @@ def register(bot):
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @gw_group.command(name="open",
-                      description="Create a gameweek's fixtures and DM every manager")
+                      description="Create a gameweek's fixtures and post the announcement")
     @app_commands.describe(
         gameweek="e.g. GW2",
         count="Only create the first N fixtures. For testing; default is all 20.",
@@ -838,7 +838,7 @@ def register(bot):
             return
         if not gw.has_fixtures:
             await interaction.followup.send(
-                "{} has no fixture list yet — add it to season.py once the draw "
+                "{} has no fixture list yet. Add it to season.py once the draw "
                 "is made.".format(gw.key),
                 ephemeral=True,
             )
@@ -877,14 +877,14 @@ def register(bot):
         except (discord.Forbidden, discord.HTTPException) as error:
             log.warning("could not post the announcement: %s", error)
 
-        parts = ["Opened **{}** — {} fixture(s) created, deadline {}.".format(
+        parts = ["Opened **{}**: {} fixture(s) created, deadline {}.".format(
             gw.key, len(made), gw.deadline.strftime("%a %d %b %H:%M UTC"))]
         if posted:
             parts.append("Announcement posted here with the **Submit my "
                          "timings** button; it updates itself as fixtures are agreed.")
         else:
-            parts.append("⚠️ Couldn't post the announcement in this channel — "
-                         "check my permissions, then run `/fixture publish`.")
+            parts.append("⚠️ Couldn't post the announcement in this channel. "
+                         "Check my permissions, then run `/fixture publish`.")
         if count:
             parts.append("-# Limited to the first {} of {} fixtures. Run again "
                          "without `count` to create the rest.".format(
@@ -933,7 +933,7 @@ def register(bot):
             who = known.get(name)
             if missing_only and who:
                 continue
-            lines.append("· `{:<3}` {} — {}".format(
+            lines.append("· `{:<3}` {}: {}".format(
                 code, name, "<@{}>".format(who) if who else "**nobody**"))
         header = "{} of {} teams have a manager.".format(len(known), len(season.TEAM_CODES))
         body = header + ("\n\n" + "\n".join(lines[:40]) if lines else

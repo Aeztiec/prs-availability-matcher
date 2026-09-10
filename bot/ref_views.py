@@ -39,7 +39,7 @@ class _OfferButton:
         if not _offered_to(store, self.fixture_id, interaction.user.id):
             # Either already answered, withdrawn, or never theirs to answer.
             await interaction.response.send_message(
-                "This assignment isn't open for you any more — it may already "
+                "This assignment is no longer open for you. It may already "
                 "have been answered or reassigned.",
                 ephemeral=True,
             )
@@ -113,7 +113,7 @@ class DeclineButton(
 
         store.resolve_offer(self.fixture_id, interaction.user.id, OFFER_DECLINED)
         await interaction.response.edit_message(
-            content="No problem — we'll ask someone else for #{}.".format(self.fixture_id),
+            content="Understood. We will ask someone else for #{}.".format(self.fixture_id),
             view=None,
         )
         # Hand off to the client so the next offer goes out the same way the

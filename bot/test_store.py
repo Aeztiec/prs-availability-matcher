@@ -205,7 +205,7 @@ check("nothing chosen says so", describe_choice(SelectorState(SLOTS)), "nothing 
 check("day summary hides NO slots",
       SelectorState(SLOTS, saved={"sat_1800": 2}).day_summary("Saturday"), "18:00 🟢")
 check("empty day shows a dash",
-      SelectorState(SLOTS, saved={"sat_1800": 2}).day_summary("Sunday"), "—")
+      SelectorState(SLOTS, saved={"sat_1800": 2}).day_summary("Sunday"), "-")
 
 # --------------------------------------------------------------------------
 print("")

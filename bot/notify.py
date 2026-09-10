@@ -36,8 +36,8 @@ def ask_for_availability(fixture, deadline_iso):
         "# {} vs {}".format(fixture["home_team"], fixture["away_team"]),
         "Fixture **#{}** needs a kickoff time.".format(fixture["id"]),
         "",
-        "Mark every time you could play — **🟢 ideal**, **🟡 fine**, or leave it "
-        "**⚪ no**. We'll pick the best time you and your opponent both agree on.",
+        "Mark every time you could play as **🟢 ideal**, **🟡 fine**, or leave it "
+        "**⚪ no**. We will pick the best time you and your opponent both agree on.",
         "",
         "Deadline: {}".format(discord_time(from_iso(deadline_iso))),
         "",
@@ -59,7 +59,7 @@ def reminder(fixture, deadline_iso, which, managers=()):
     urgency = {"12h": "in about 12 hours", "2h": "in about 2 hours"}.get(which, "soon")
     who = " ".join("<@{}>".format(m) for m in managers)
     lines = [
-        "⏰ **Reminder — {} vs {}**".format(fixture["home_team"], fixture["away_team"]),
+        "⏰ **Reminder: {} vs {}**".format(fixture["home_team"], fixture["away_team"]),
     ]
     if who:
         lines.append(who)
@@ -111,7 +111,7 @@ def referee_offer(fixture, slot, referee_id=None):
     """
     lines = ["## 👨‍⚖️ Referee needed"]
     if referee_id:
-        lines.append("<@{}> — can you take this one?".format(referee_id))
+        lines.append("<@{}>, can you take this fixture?".format(referee_id))
     lines += [
         "",
         "**{}** vs **{}**  ·  #{}".format(
@@ -157,9 +157,8 @@ def no_valid_time(fixture, reason):
 # --------------------------------------------------------------------------
 
 # Discord rejects a message over 2000 characters outright. Forty fixtures at
-# ~55 characters a row clears that, so the board is split across messages -
-# with headroom for the continuation marker and for team names longer than the
-# ones tested.
+# ~55 characters a row clears that, so the board is split across messages when
+# it needs to be, with headroom for team names longer than the ones tested.
 BOARD_CHUNK = 1800
 
 STATUS_ICON = {
@@ -278,22 +277,28 @@ def availability_call_to_action(gameweek, deadline):
 
     Public and button-driven on purpose. A DM only reaches managers who allow
     them; a button in a channel reaches everyone, and each person who clicks it
-    gets their own private selector.
+    gets their own private selector. The formatting matches the announcement
+    above it: a bold underlined heading and a bold all-caps label for the
+    deadline, rather than reading like a separate, casually written message.
     """
     return "\n".join([
-        "## 📋 Managers — submit your timings",
+        "**__Managers, submit your timings:__**",
         "",
-        "Press the button below to set when **your** team can play in "
-        "**{}**. It opens privately, so only you see it.".format(gameweek.label),
+        "Use the button below to enter the times **{}** works for your "
+        "team. The selector opens privately, so only you can see your "
+        "responses.".format(gameweek.label),
         "",
-        "Mark every time you could play — **🟢 ideal**, **🟡 fine**, or leave it "
-        "**⚪ no**. We pick the best time you and your opponent both agree on, "
-        "and the fixture list above fills in by itself.",
+        "Mark each time as **🟢 ideal**, **🟡 fine**, or leave it **⚪ no** "
+        "if you are not available. Once both managers have responded, the "
+        "best mutually available time is selected automatically and the "
+        "fixture list above is updated.",
         "",
-        "You can change your answers until {}.".format(discord_time(deadline, "F")),
+        "**DEADLINE:**",
+        discord_time(deadline, "F"),
         "",
-        "-# Nothing to submit? That means your gameweek isn't open yet, or "
-        "you're not registered as a manager — ask an Official.",
+        "-# If you have nothing to submit, your gameweek may not be open "
+        "yet, or you are not registered as a manager. Contact an Official "
+        "if you believe this is incorrect.",
     ])
 
 
@@ -314,8 +319,8 @@ def _chunk(lines, footer=()):
     for line in lines:
         if length + len(line) + 1 > BOARD_CHUNK and current:
             messages.append(current)
-            current = ["-# …continued"]
-            length = len(current[0])
+            current = []
+            length = 0
         current.append(line)
         length += len(line) + 1
     if current:
@@ -327,7 +332,7 @@ def _chunk(lines, footer=()):
         if messages and length + tail <= BOARD_CHUNK:
             messages[-1] += footer
         else:
-            messages.append(["-# …continued"] + footer)
+            messages.append(list(footer))
 
     return ["\n".join(block) for block in messages] or [""]
 
@@ -358,11 +363,11 @@ def dashboard_summary(buckets, week, waiting_on=None, reasons=None, asked=None):
         ("🟠", len(buckets["ref_needed"]), "ref needed"),
         ("🔴", len(buckets["no_valid_time"]), "no valid time"),
     ]
-    lines = ["# Scheduling — week of {}".format(week), ""]
+    lines = ["# Scheduling: week of {}".format(week), ""]
     lines += ["{} **{}** {}".format(icon, n, label) for icon, n, label in counts]
 
     if buckets["no_valid_time"]:
-        lines += ["", "🔴 **No valid time** — needs scheduling by hand"]
+        lines += ["", "🔴 **No valid time** (needs scheduling by hand)"]
         for fixture in buckets["no_valid_time"][:8]:
             lines.append("· **#{}** {} v {}".format(
                 fixture["id"], fixture["home_team"], fixture["away_team"]))
@@ -376,7 +381,7 @@ def dashboard_summary(buckets, week, waiting_on=None, reasons=None, asked=None):
         for fixture in buckets["ref_needed"][:8]:
             been_asked = asked.get(fixture["id"]) or []
             tail = "  -# {} already asked".format(len(been_asked)) if been_asked else ""
-            lines.append("· **#{}** {} v {} — {}{}".format(
+            lines.append("· **#{}** {} v {}: {}{}".format(
                 fixture["id"], fixture["home_team"], fixture["away_team"],
                 fixture["slot_key"] or "no time", tail))
         lines.append("-# Fix with `/refs assign fixture:<id> user:@ref`")
@@ -386,7 +391,7 @@ def dashboard_summary(buckets, week, waiting_on=None, reasons=None, asked=None):
         for fixture in buckets["awaiting"][:8]:
             missing = waiting_on.get(fixture["id"]) or []
             who = ", ".join("<@{}>".format(m) for m in missing) or "nobody"
-            lines.append("· **#{}** {} v {} — waiting on {}".format(
+            lines.append("· **#{}** {} v {}, waiting on {}".format(
                 fixture["id"], fixture["home_team"], fixture["away_team"], who))
 
     for key in ("no_valid_time", "ref_needed", "awaiting"):
@@ -417,6 +422,6 @@ def fixture_detail(fixture, history, slot=None):
     if history:
         lines += ["", "**Scheduling log**"]
         for entry in history[-15:]:
-            detail = " — {}".format(entry["detail"]) if entry["detail"] else ""
+            detail = ": {}".format(entry["detail"]) if entry["detail"] else ""
             lines.append("`{}`  {}{}".format(entry["at"][11:16], entry["event"], detail))
     return "\n".join(lines)

@@ -101,7 +101,7 @@ class SelectorState:
             for s in self.slots_for(day)
             if self.picks[s.key] != Pref.NO
         ]
-        return "  ".join(parts) if parts else "—"
+        return "  ".join(parts) if parts else "-"
 
     def summary_lines(self):
         return ["**{}** · {}".format(day, self.day_summary(day)) for day in self.days]
