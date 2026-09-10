@@ -434,6 +434,39 @@ loose = picker_store.create_fixture(
 leagueless = fixture_picker([picker_store.fixture(loose)])
 check("still lists the fixture", "TEAM Z FC" in leagueless, True)
 
+print("\na manager with dozens of open fixtures never crashes the reply")
+# What actually happened live: the same two test accounts were left managing
+# every team across three still-open gameweeks (season.seed_managers only
+# guarantees no shared manager within the one gameweek it is run for), so a
+# real account ended up with 47 open fixtures. Discord rejects any message
+# over 2000 characters outright, and fixture_picker had no cap at all - the
+# interaction failed with a 400 and the manager got no reply whatsoever.
+big_store = fresh_store()
+big_fixtures = []
+for week_n in range(3):                       # three open gameweeks worth
+    for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
+        fid = big_store.create_fixture(
+            "S17_Clubs", WEEK, _season.team_name(h), _season.team_name(a),
+            800 + week_n * 100 + n, 700, "2026-09-11T18:00:00Z",
+            Status.WAITING_FOR_AVAILABILITY, league=lg,
+        )
+        big_fixtures.append(big_store.fixture(fid))
+check("reproduces the live scale", len(big_fixtures), 60)
+
+big_picker = fixture_picker(big_fixtures)
+full_reply = ("You have more than one fixture open. Run the command under "
+             "the one you want to set:\n\n" + big_picker)
+check("stays comfortably under Discord's 2000-character limit",
+      len(full_reply) <= DISCORD_LIMIT, True)
+check("says how many were left off", "more" in big_picker, True)
+check("still names at least one real fixture", "`/availability fixture:" in big_picker, True)
+
+print("\nthe cap holds even at absurd scale")
+huge = big_fixtures * 5                        # 300 fixtures, one account
+huge_reply = ("You have more than one fixture open. Run the command under "
+             "the one you want to set:\n\n" + fixture_picker(huge))
+check("still under the limit at 300 fixtures", len(huge_reply) <= DISCORD_LIMIT, True)
+
 # --------------------------------------------------------------------------
 print("")
 if FAILURES:

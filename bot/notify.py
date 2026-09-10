@@ -342,6 +342,12 @@ def board_digest(bodies):
     return hashlib.sha256("\n".join(bodies).encode("utf-8")).hexdigest()[:16]
 
 
+# Leaves headroom under Discord's 2000-character cap for the sentence a
+# caller prepends before this (about 120 characters) plus the truncation
+# note below, without needing to compute those first.
+PICKER_CHUNK = 1700
+
+
 def fixture_picker(fixtures):
     """A grouped, badged list of fixtures to choose between.
 
@@ -350,25 +356,53 @@ def fixture_picker(fixtures):
     wherever they run into it, rather than each entry point inventing its own
     plain bullet list. Rows use the same badges and division grouping as the
     fixture board itself.
+
+    Capped at PICKER_CHUNK characters. This is a single interaction reply, not
+    a channel post like the announcement, so it cannot be split across several
+    messages the way fixture_board can - Discord rejects anything over 2000
+    characters outright, and a manager whose account is somehow attached to
+    dozens of fixtures (every team mapped to one test account across several
+    open gameweeks, say) would otherwise silently fail to get a reply at all
+    rather than a shorter, still usable list.
     """
     by_league = {}
     for fixture in fixtures:
         key = fixture.get("league") or "??"
         by_league.setdefault(key, []).append(fixture)
 
-    lines = []
     order = list(season.LEAGUES) + sorted(k for k in by_league if k not in season.LEAGUES)
+
+    lines = []
+    length = 0
+    shown = 0
+    stopped_early = False
+
     for key in order:
         rows = by_league.get(key)
         if not rows:
             continue
-        lines.append("**__{}:__**".format(season.LEAGUES.get(key, key)))
+        heading = "**__{}:__**".format(season.LEAGUES.get(key, key))
+        lines.append(heading)
+        length += len(heading) + 1
         for fixture in rows:
             home = season.label_for(fixture["home_team"])
             away = season.label_for(fixture["away_team"])
-            lines.append("{} *vs* {} · `/availability fixture:{}`".format(
-                home, away, fixture["id"]))
+            row = "{} *vs* {} · `/availability fixture:{}`".format(
+                home, away, fixture["id"])
+            if length + len(row) + 1 > PICKER_CHUNK:
+                stopped_early = True
+                break
+            lines.append(row)
+            length += len(row) + 1
+            shown += 1
         lines.append("")
+        length += 1
+        if stopped_early:
+            break
+
+    if stopped_early:
+        lines.append("-# ...and {} more. Use `/availability fixture:<id>` for "
+                     "any of them.".format(len(fixtures) - shown))
 
     return "\n".join(lines).rstrip()
 
