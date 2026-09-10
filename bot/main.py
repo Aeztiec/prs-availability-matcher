@@ -191,6 +191,18 @@ class PRSBot(discord.Client):
     def slot(self, key):
         return next((s for s in self.slots if s.key == key), None)
 
+    def current_week(self):
+        """The week key commands default to: the current gameweek's weekend.
+
+        Not the next calendar Saturday. Those differ whenever a gameweek is
+        more than a few days out - today's calendar week is 2026-09-12 while
+        GW1 plays the weekend of 2026-09-19 - and defaulting to the calendar
+        week made /fixture list and /refs availability quietly look at a
+        weekend with nothing in it.
+        """
+        gw = season.current(utcnow())
+        return gw.week if gw else week_of(utcnow())
+
     async def offer_referee(self, fixture, slot, attempts=12):
         """Ask referees in ranked order until one is reachable.
 
@@ -533,7 +545,7 @@ def register(bot):
     @app_commands.describe(week="Saturday of the weekend, YYYY-MM-DD. Defaults to the next one.")
     @staff_only()
     async def fixture_list(interaction, week: str = None):
-        await bot.show_dashboard(interaction, week or week_of(utcnow()))
+        await bot.show_dashboard(interaction, week or bot.current_week())
 
     @fixture_group.command(name="show", description="One fixture, with its scheduling log")
     @staff_only()
@@ -555,7 +567,7 @@ def register(bot):
     async def fixture_run(interaction, week: str = None):
         await interaction.response.defer(ephemeral=True)
         await bot.process(week=week)
-        await bot.show_dashboard(interaction, week or week_of(utcnow()), followup=True)
+        await bot.show_dashboard(interaction, week or bot.current_week(), followup=True)
 
     @fixture_group.command(name="set", description="Set a kickoff time by hand")
     @app_commands.describe(slot="Slot key, e.g. sat_1800")
@@ -605,7 +617,7 @@ def register(bot):
     @refs_group.command(name="list", description="Registered referees and their load")
     @staff_only()
     async def refs_list(interaction, week: str = None):
-        week = week or week_of(utcnow())
+        week = week or bot.current_week()
         workload = store.ref_workload(week)
         rows = store.referees()
         if not rows:
@@ -659,7 +671,7 @@ def register(bot):
                 ephemeral=True,
             )
             return
-        week = week or week_of(utcnow())
+        week = week or bot.current_week()
         await open_selector(interaction, store, Target(SCOPE_REF_WEEK, week), bot.slots)
 
     @fixture_group.command(name="publish",
@@ -667,7 +679,7 @@ def register(bot):
     @app_commands.describe(week="Saturday of the weekend, YYYY-MM-DD. Defaults to the next one.")
     @staff_only()
     async def fixture_publish(interaction, week: str = None):
-        week = week or week_of(utcnow())
+        week = week or bot.current_week()
         await interaction.response.defer(ephemeral=True)
         existing = store.board(week)
         try:
@@ -690,7 +702,7 @@ def register(bot):
     @fixture_group.command(name="unpublish", description="Stop updating this week's board")
     @staff_only()
     async def fixture_unpublish(interaction, week: str = None):
-        week = week or week_of(utcnow())
+        week = week or bot.current_week()
         if not store.board(week):
             await interaction.response.send_message(
                 "No board published for the week of {}.".format(week), ephemeral=True
@@ -843,7 +855,7 @@ def register(bot):
     @tree.command(description="Check the bot's configuration and data")
     @staff_only()
     async def status(interaction):
-        week = week_of(utcnow())
+        week = bot.current_week()
         await interaction.response.send_message("\n".join([
             "**{}**".format(bot.timings.title),
             "Slots offered: {} across {}".format(
