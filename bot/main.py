@@ -3,8 +3,12 @@
 Thin by design. Commands validate input, call into orchestrator/db, and report;
 the deciding happens in modules that are tested without a gateway.
 
-    python -m bot.main            run the bot
-    python -m bot.main --check    load everything and exit, without connecting
+    python -m bot.main              run the bot
+    python -m bot.main --check      load everything and exit, without connecting
+    python -m bot.main --fast-sync  register commands in the guild too, so new
+                                    ones appear immediately instead of waiting
+                                    on global propagation. Shows every command
+                                    twice; a normal restart clears that.
 """
 
 from __future__ import annotations
@@ -39,7 +43,12 @@ TICK_MINUTES = 5
 
 
 class PRSBot(discord.Client):
-    def __init__(self):
+    def __init__(self, fast_sync=False):
+        # Testing only. Global commands can take up to an hour to reach a
+        # client; a guild sync is instant. It makes every command appear twice
+        # in this server until a normal restart, which clears the guild copies
+        # again - so it is opt-in and self-undoing rather than the default.
+        self.fast_sync = fast_sync
         # Only `guilds`, which is not privileged. Message content and members
         # are never needed - everything is slash commands and buttons - but
         # without `guilds` the role objects behind a STAFF_ROLE_ID check cannot
@@ -62,7 +71,15 @@ class PRSBot(discord.Client):
         # server's picker, so guild copies are actively cleared below.
         await self.tree.sync()
         log.info("commands synced globally")
-        await self.clear_guild_commands()
+        if self.fast_sync and config.GUILD_ID:
+            guild = discord.Object(id=config.GUILD_ID)
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            log.warning("--fast-sync: also synced to guild %s. Commands will "
+                        "appear TWICE here until you restart without the flag.",
+                        config.GUILD_ID)
+        else:
+            await self.clear_guild_commands()
         self.runner.start()
 
     async def clear_guild_commands(self):
@@ -821,7 +838,7 @@ def main(argv=None):
               file=sys.stderr)
         return 1
 
-    PRSBot().run(config.TOKEN, log_handler=None)
+    PRSBot(fast_sync="--fast-sync" in argv).run(config.TOKEN, log_handler=None)
     return 0
 
 
