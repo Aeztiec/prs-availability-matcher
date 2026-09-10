@@ -3,3 +3,8 @@
 
 __pycache__/
 *.pyc
+
+# Bot secrets - the Discord token must never be committed to a public repo.
+.env
+*.db
+*.sqlite3
