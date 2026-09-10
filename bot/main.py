@@ -17,8 +17,9 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-from . import config, notify
+from . import config, notify, referees
 from .db import OFFER_ACCEPTED, OFFER_DECLINED, Store
+from .ref_views import REF_DYNAMIC_ITEMS, offer_view
 from .fallback import Timings
 from .orchestrator import Action, dashboard, run_once
 from .scheduling import Status
@@ -51,7 +52,7 @@ class PRSBot(discord.Client):
     # ------------------------------------------------------------- lifecycle
     async def setup_hook(self):
         self.load_timings()
-        for item in DYNAMIC_ITEMS:
+        for item in DYNAMIC_ITEMS + REF_DYNAMIC_ITEMS:
             self.add_dynamic_items(item)
         register(self)
         # Global, not guild-scoped: guild commands are unavailable in DMs, and
@@ -116,8 +117,38 @@ class PRSBot(discord.Client):
                 log.warning("fixture %s needs manual scheduling: %s",
                             fixture["id"], outcome.detail)
 
+        # Anything with a time but no referee - including fixtures scheduled
+        # before a restart, whose offer never went out.
+        for fixture in self.store.fixtures_awaiting_referee(week=week):
+            slot = self.slot(fixture["slot_key"])
+            if slot:
+                await self.offer_referee(fixture, slot)
+
     def slot(self, key):
         return next((s for s in self.slots if s.key == key), None)
+
+    async def offer_referee(self, fixture, slot, attempts=12):
+        """Ask referees in ranked order until one is reachable.
+
+        A referee who cannot be DM'd is recorded as declined rather than left
+        pending - otherwise the fixture would sit waiting on an offer that was
+        never delivered, and the sweep above would never retry it.
+        """
+        for _ in range(attempts):
+            candidate = referees.offer(self.store, fixture, slot.key)
+            if candidate is None:
+                log.warning("fixture %s needs a referee by hand", fixture["id"])
+                return None
+            sent = await self.dm(
+                candidate.referee_id, notify.referee_offer(fixture, slot),
+                view=offer_view(fixture["id"]),
+            )
+            if sent:
+                return candidate
+            self.store.resolve_offer(fixture["id"], candidate.referee_id, OFFER_DECLINED)
+            self.store.note(fixture["id"], "referee unreachable",
+                            str(candidate.referee_id))
+        return None
 
     @tasks.loop(minutes=TICK_MINUTES)
     async def runner(self):
@@ -368,6 +399,35 @@ def register(bot):
                 "" if (got and got["submitted"]) else "  ⚠️ no availability submitted",
             ))
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @refs_group.command(name="assign", description="Assign a referee by hand")
+    @staff_only()
+    async def refs_assign(interaction, fixture: int, user: discord.User):
+        record = store.fixture(fixture)
+        if not record:
+            await interaction.response.send_message(
+                "No fixture #{}.".format(fixture), ephemeral=True
+            )
+            return
+        if not record["slot_key"]:
+            await interaction.response.send_message(
+                "#{} has no kickoff time yet.".format(fixture), ephemeral=True
+            )
+            return
+        store.add_referee(user.id, user.display_name)
+        store.withdraw_offers(fixture)
+        store.set_referee(fixture, user.id)
+        store.set_status(fixture, Status.FULLY_CONFIRMED,
+                         "referee set by hand by {}".format(interaction.user.id))
+        record = store.fixture(fixture)
+        slot = bot.slot(record["slot_key"])
+        await bot.dm(user.id, notify.referee_confirmed(record, slot))
+        for manager_id in (record["home_manager_id"], record["away_manager_id"]):
+            await bot.dm(manager_id, notify.fixture_confirmed(
+                record, slot, referee_name=user.display_name))
+        await interaction.response.send_message(
+            "{} assigned to #{}.".format(user.mention, fixture), ephemeral=True
+        )
 
     @refs_group.command(name="availability", description="Set your referee availability")
     async def refs_availability(interaction, week: str = None):

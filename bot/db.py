@@ -358,3 +358,76 @@ class Store:
             args.append(ignore_fixture)
         with self._connect() as conn:
             return {r["slot_key"] for r in conn.execute(sql, args)}
+
+    # ------------------------------------------- referee allocation context
+    def ref_pending_count(self, week, competition=None):
+        """referee_id -> outstanding offers this week.
+
+        Counted towards a referee's load alongside accepted games. Without it,
+        a batch of fixtures scheduled in one pass would all be offered to
+        whoever currently has the fewest games - flooding one person with
+        offers they then have to decline.
+        """
+        sql = ("SELECT o.referee_id, COUNT(*) AS n FROM ref_offers o "
+               "JOIN fixtures f ON f.id = o.fixture_id "
+               "WHERE o.state = ? AND f.week = ?")
+        args = [OFFER_OFFERED, week]
+        if competition:
+            sql += " AND f.competition = ?"
+            args.append(competition)
+        with self._connect() as conn:
+            return {r["referee_id"]: r["n"]
+                    for r in conn.execute(sql + " GROUP BY o.referee_id", args)}
+
+    def ref_slot_assignments(self, week, competition=None):
+        """slot_key -> {referee_id, ...} already committed to that slot.
+
+        A referee cannot be in two places at once, so this is a hard exclusion
+        rather than a ranking penalty. Pending offers are included: offering
+        someone two fixtures in the same slot means one of them must be
+        withdrawn later.
+        """
+        sql = ("SELECT f.slot_key, f.referee_id AS assigned, o.referee_id AS offered "
+               "FROM fixtures f LEFT JOIN ref_offers o "
+               "  ON o.fixture_id = f.id AND o.state = ? "
+               "WHERE f.week = ? AND f.slot_key IS NOT NULL")
+        args = [OFFER_OFFERED, week]
+        if competition:
+            sql += " AND f.competition = ?"
+            args.append(competition)
+        busy = {}
+        with self._connect() as conn:
+            for row in conn.execute(sql, args):
+                for referee_id in (row["assigned"], row["offered"]):
+                    if referee_id:
+                        busy.setdefault(row["slot_key"], set()).add(referee_id)
+        return busy
+
+    def withdraw_offers(self, fixture_id):
+        """Mark any outstanding offer on a fixture as superseded."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE ref_offers SET state=?, responded_at=? WHERE fixture_id=? AND state=?",
+                (OFFER_SUPERSEDED, now(), fixture_id, OFFER_OFFERED),
+            )
+
+    def fixtures_awaiting_referee(self, week=None, competition=None):
+        """Scheduled, no referee, nobody currently being asked, not yet flagged.
+
+        Lets referee allocation resume after a restart: a fixture whose offer
+        was never sent is picked up on the next pass rather than sitting
+        refereeless until someone notices.
+        """
+        sql = ("SELECT f.* FROM fixtures f WHERE f.slot_key IS NOT NULL "
+               "AND f.referee_id IS NULL AND f.status <> ? "
+               "AND NOT EXISTS (SELECT 1 FROM ref_offers o "
+               "                WHERE o.fixture_id = f.id AND o.state = ?)")
+        args = ["NEEDS_MANUAL_REF", OFFER_OFFERED]
+        if week:
+            sql += " AND f.week = ?"
+            args.append(week)
+        if competition:
+            sql += " AND f.competition = ?"
+            args.append(competition)
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute(sql + " ORDER BY f.id", args)]
