@@ -32,11 +32,11 @@ SEASON_LABEL = "SEASON 17"
 # BL, LL, SA, L1) and `python -m bot.sync_emoji --write` picks them up.
 SEASON_EMOJI = "<:PRS:1547652837981294822>"
 LEAGUE_EMOJI = {
-    "PL": "<:PL:1547652587430613113>",  # Premier League
-    "BL": "<:BL:1547646659519975515>",  # Bundesliga
-    "LL": "<:LL:1547650711980867625>",  # La Liga
+    "PL": "<:PL:1547656282922815528>",  # Premier League
+    "BL": "<:BL:1547656319274582036>",  # Bundesliga
+    "LL": "<:LL:1547656360382959656>",  # La Liga
     "SA": "<:SA:1547650617193922722>",  # Serie A
-    "L1": "<:L1:1547652686462320650>",  # Ligue 1
+    "L1": "<:L1:1547656740462534686>",  # Ligue 1
 }
 
 # No match may start before this. From the league instructions: "You can
