@@ -37,8 +37,7 @@ TICK_MINUTES = 5
 
 
 class PRSBot(discord.Client):
-    def __init__(self, sync_guild=False):
-        self.sync_guild = sync_guild
+    def __init__(self):
         # Only `guilds`, which is not privileged. Message content and members
         # are never needed - everything is slash commands and buttons - but
         # without `guilds` the role objects behind a STAFF_ROLE_ID check cannot
@@ -55,16 +54,35 @@ class PRSBot(discord.Client):
         for item in DYNAMIC_ITEMS + REF_DYNAMIC_ITEMS:
             self.add_dynamic_items(item)
         register(self)
-        # Global, not guild-scoped: guild commands are unavailable in DMs, and
+        # Global only. Guild-scoped commands do not exist in DMs, and
         # /availability has to work where the manager is being messaged.
+        # Registering both scopes makes every command appear twice in the
+        # server's picker, so guild copies are actively cleared below.
         await self.tree.sync()
         log.info("commands synced globally")
-        if self.sync_guild and config.GUILD_ID:
-            guild = discord.Object(id=config.GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-            log.info("also synced to guild %s for immediate testing", config.GUILD_ID)
+        await self.clear_guild_commands()
         self.runner.start()
+
+    async def clear_guild_commands(self):
+        """Remove guild-scoped duplicates of the global commands.
+
+        Only acts if there are any, so a normal start costs one cheap read.
+        Self-healing: whatever left stale copies behind, they go on next boot.
+        """
+        if not config.GUILD_ID:
+            return
+        guild = discord.Object(id=config.GUILD_ID)
+        try:
+            existing = await self.tree.fetch_commands(guild=guild)
+        except discord.HTTPException as error:
+            log.warning("could not read guild commands: %s", error)
+            return
+        if not existing:
+            return
+        self.tree.clear_commands(guild=guild)
+        await self.tree.sync(guild=guild)
+        log.info("removed %d duplicate guild command(s): %s", len(existing),
+                 ", ".join(sorted(c.name for c in existing)))
 
     def load_timings(self):
         """(Re)read the timings sheet and rebuild the slot vocabulary."""
@@ -594,7 +612,7 @@ def main(argv=None):
               file=sys.stderr)
         return 1
 
-    PRSBot(sync_guild="--sync-guild" in argv).run(config.TOKEN, log_handler=None)
+    PRSBot().run(config.TOKEN, log_handler=None)
     return 0
 
 
