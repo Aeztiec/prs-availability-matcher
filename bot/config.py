@@ -46,6 +46,12 @@ REFEREE_ROLE_ID = _int("DISCORD_REFEREE_ROLE_ID")
 # default competition (newest season, preferring Clubs).
 COMPETITION = os.environ.get("PRS_COMPETITION", "") or None
 
+# Who gets pinged at the top of a gameweek announcement. "@everyone" or a role
+# mention like "<@&123456789>"; set it empty to announce without pinging.
+# Only the first post pings - editing a message does not re-notify, and the
+# board is edited rather than reposted as fixtures get times.
+ANNOUNCE_MENTION = os.environ.get("DISCORD_ANNOUNCE_MENTION", "@everyone").strip()
+
 # Reminder offsets before the deadline, in hours.
 REMINDERS = (12, 2)
 

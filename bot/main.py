@@ -315,6 +315,7 @@ class PRSBot(discord.Client):
         return notify.fixture_board(
             self.store.fixtures(week=week), week, self.slot, referee_names=names,
             gameweek=gw, deadline=gw.deadline if gw else None,
+            mention=config.ANNOUNCE_MENTION or None,
         )
 
     async def publish_board(self, week, channel, with_button=True):
@@ -325,7 +326,16 @@ class PRSBot(discord.Client):
         action stays at the bottom of the channel where people will see it.
         """
         bodies = self.board_bodies(week)
-        sent = [await channel.send(body) for body in bodies]
+        # Only this first post is allowed to notify anyone. Every later edit,
+        # and any continuation message added afterwards, is sent with mentions
+        # suppressed - so opening a gameweek pings the server exactly once.
+        pinging = discord.AllowedMentions(everyone=True, roles=True, users=False)
+        quiet = discord.AllowedMentions.none()
+        sent = []
+        for index, body in enumerate(bodies):
+            sent.append(await channel.send(
+                body, allowed_mentions=pinging if index == 0 else quiet
+            ))
         self.store.set_board(week, channel.id, [m.id for m in sent],
                              notify.board_digest(bodies))
         message = sent[0]
@@ -352,20 +362,40 @@ class PRSBot(discord.Client):
         digest = notify.board_digest(bodies)
         if digest == record.get("digest"):
             return False
+        known = self.store.board_message_ids(week)
         try:
             channel = self.get_channel(record["channel_id"]) or \
                 await self.fetch_channel(record["channel_id"])
-            message = await channel.fetch_message(record["message_id"])
-            await message.edit(content=bodies[0])
+
+            # Maintain every message the board occupies, not just the first.
+            # A full gameweek needs two once club badges and referee names
+            # lengthen the rows, and the count changes as fixtures get times -
+            # so edit what exists, add what is newly needed, drop the surplus.
+            # Mentions are suppressed throughout: the initial post in
+            # publish_board is the only thing allowed to ping.
+            quiet = discord.AllowedMentions.none()
+            live = []
+            for index, body in enumerate(bodies):
+                if index < len(known):
+                    message = await channel.fetch_message(known[index])
+                    if message.content != body:
+                        await message.edit(content=body, allowed_mentions=quiet)
+                    live.append(message.id)
+                else:
+                    live.append((await channel.send(body, allowed_mentions=quiet)).id)
+
+            for stale in known[len(bodies):]:
+                try:
+                    await (await channel.fetch_message(stale)).delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
         except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
             # Deleted or unreachable: forget it rather than retrying forever.
             log.warning("board for %s unreachable (%s); forgetting it", week, error)
             self.store.forget_board(week)
             return False
-        self.store.set_board_digest(week, digest)
-        if len(bodies) > 1:
-            log.info("board for %s needs %d messages; only the first is edited "
-                     "in place - republish with /fixtures publish", week, len(bodies))
+
+        self.store.set_board(week, record["channel_id"], live, digest)
         return True
 
     def dashboard_context(self, week):

@@ -152,7 +152,7 @@ store.create_fixture("S17_Clubs", WEEK, "LATE FC", "SLOW FC", 5, 6,
                      "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY,
                      league="PL")
 mixed = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for))
-check("shows a placeholder", "to be decided" in mixed, True)
+check("shows a TBD placeholder", "`TBD`" in mixed, True)
 check("and is still listed", "LATE FC" in mixed, True)
 
 print("\nan empty week says so instead of rendering a bare heading")
@@ -279,8 +279,8 @@ real = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, real_names,
                      gameweek=gw1, deadline=gw1.deadline)
 check("every message within the limit", all(len(b) <= DISCORD_LIMIT for b in real), True)
 check("all 20 rendered", sum(b.count(" **vs** ") for b in real), 20)
-check("half still say to be decided",
-      sum(b.count("to be decided") for b in real), 10)
+check("half still say TBD",
+      sum(b.count("`TBD`") for b in real), 10)
 print("       ({} message(s), longest {} chars)".format(
     len(real), max(len(b) for b in real)))
 
@@ -317,6 +317,29 @@ try:
         len(badged), max(len(b) for b in badged)))
 finally:
     _season.TEAM_EMOJI = real_emoji
+
+print("\nthe ping and the TBD placeholder")
+tbd_store = fresh_store()
+tbd_store.create_fixture("S17_Clubs", WEEK, "WAITING FC", "PENDING FC", 61, 62,
+                         "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY,
+                         league="PL")
+tbd = "\n".join(fixture_board(tbd_store.fixtures(week=WEEK), WEEK, slot_for))
+check("undecided fixtures read TBD", "`TBD`" in tbd, True)
+check("the old long-dash placeholder is gone", "to be decided" in tbd, False)
+
+pinged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
+                       gameweek=gw1, deadline=gw1.deadline, mention="@everyone")
+check("the ping is the very first line", pinged[0].splitlines()[0], "@everyone")
+check("it sits above the heading",
+      pinged[0].splitlines()[1].startswith("# PRS"), True)
+check("only the first message carries it",
+      all(not b.startswith("@everyone") for b in pinged[1:]), True)
+quiet = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
+                      gameweek=gw1, deadline=gw1.deadline, mention=None)
+check("no ping when unset", quiet[0].startswith("#"), True)
+check("a role mention works too",
+      fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
+                    mention="<@&123>")[0].splitlines()[0], "<@&123>")
 
 check("a team without a badge falls back to its name",
       _season.label_for("NO SUCH TEAM"), "NO SUCH TEAM")

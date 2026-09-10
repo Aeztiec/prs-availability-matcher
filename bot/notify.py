@@ -163,7 +163,7 @@ def board_row(fixture, slot, referee_name=None):
     if slot:
         when = discord_time(slot_datetime(fixture["week"], slot), "F")
     else:
-        when = "`  ——  to be decided  ——  `"
+        when = "`TBD`"
     line = "{} **vs** {} @ {}".format(home, away, when)
     if referee_name:
         line += "  -# ref {}".format(referee_name)
@@ -173,7 +173,7 @@ def board_row(fixture, slot, referee_name=None):
 
 
 def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
-                  deadline=None):
+                  deadline=None, mention=None):
     """The public fixture announcement, grouped by division.
 
     Every fixture appears, scheduled or not. It is edited in place as times get
@@ -192,7 +192,9 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
         season.SEASON, (gameweek.label if gameweek else "Fixtures").upper()
     )
     header = "# {}:".format(title.upper())
-    lines = [header, ""]
+    # The ping goes above the heading, where the league's own posts put it.
+    # Only the first send notifies anyone; later edits do not re-ping.
+    lines = ([mention] if mention else []) + [header, ""]
 
     order = list(season.LEAGUES) + sorted(k for k in by_league if k not in season.LEAGUES)
     for key in order:
