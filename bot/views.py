@@ -349,3 +349,47 @@ class ClearButton(
 
 
 DYNAMIC_ITEMS = (SlotButton, DayButton, SubmitButton, ClearButton)
+
+
+class OpenButton(
+    _SelectorButton,
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"avo:(?P<scope>fx|rw):(?P<ref>[\w.-]+)",
+):
+    """Opens the selector from a DM.
+
+    Managers get this on the fixture DM so they never have to find a slash
+    command. It matters for a second reason: commands synced to a guild are not
+    available in DMs, and a fresh global sync can take a while to propagate -
+    this button works the moment the DM lands.
+    """
+
+    def __init__(self, target, label="Set availability"):
+        self.target = target
+        super().__init__(
+            discord.ui.Button(
+                label=label,
+                style=discord.ButtonStyle.primary,
+                custom_id="avo:{}:{}".format(target.scope, target.ref),
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(Target(match["scope"], match["ref"]))
+
+    async def callback(self, interaction):
+        if not await self.guard(interaction, self.target):
+            return
+        store, slots = self.context(interaction)
+        await open_selector(interaction, store, self.target, slots)
+
+
+def opener(target, label="Set availability"):
+    """A one-button View to attach to a DM."""
+    view = discord.ui.View(timeout=None)
+    view.add_item(OpenButton(target, label))
+    return view
+
+
+DYNAMIC_ITEMS = DYNAMIC_ITEMS + (OpenButton,)

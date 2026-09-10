@@ -25,7 +25,8 @@ from bot.selector import SelectorState
 from bot.slots import Slot, clean_day, slot_key
 from bot.views import (
     DYNAMIC_ITEMS, SCOPE_FIXTURE, SCOPE_REF_WEEK,
-    ClearButton, DayButton, SlotButton, SubmitButton, Target, build_view,
+    ClearButton, DayButton, OpenButton, SlotButton, SubmitButton, Target,
+    build_view, opener,
 )
 
 FAILURES = []
@@ -72,6 +73,7 @@ def emitted_ids(target):
         (DayButton, DayButton(target, 1, "Sunday").custom_id),
         (SubmitButton, SubmitButton(target).custom_id),
         (ClearButton, ClearButton(target).custom_id),
+        (OpenButton, OpenButton(target).custom_id),
     ]
 
 
@@ -182,8 +184,23 @@ check("open while unscheduled", FIXTURE_TARGET.closed(FakeStore()), None)
 check("ref weeks never close", WEEK_TARGET.closed(FakeStore()), None)
 
 # --------------------------------------------------------------------------
+print("\nthe DM opener button")
+# --------------------------------------------------------------------------
+# "avo:" must not be swallowed by the "av:" slot template - if it were, the DM
+# button would route to a slot handler and cycle a nonexistent slot.
+open_id = OpenButton(FIXTURE_TARGET).custom_id
+check("opener id", open_id, "avo:fx:1024")
+check("does not match the slot template",
+      bool(SlotButton.__discord_ui_compiled_template__.fullmatch(open_id)), False)
+check("a slot id does not match the opener template",
+      bool(OpenButton.__discord_ui_compiled_template__.fullmatch("av:fx:1024:sat_1600")), False)
+view_dm = opener(FIXTURE_TARGET)
+check("one button on the DM view", len(view_dm.children), 1)
+check("labelled for a human", view_dm.children[0].item.label, "Set availability")
+check("works for ref weeks too", OpenButton(WEEK_TARGET).custom_id, "avo:rw:2026-09-12")
+
 print("")
 if FAILURES:
     print("{} FAILED: {}".format(len(FAILURES), ", ".join(FAILURES)))
     sys.exit(1)
-print("all view-layer checks passed")
+print("all view-layer checks passed (including the opener)")
