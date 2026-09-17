@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS fixtures (
     status           TEXT    NOT NULL,
     slot_key         TEXT,
     schedule_source  TEXT,
-    referee_id       INTEGER,
+    referee_id       INTEGER,  -- unused: officiating now lives in fixture_referees
     reminded_12h     INTEGER NOT NULL DEFAULT 0,
     reminded_2h      INTEGER NOT NULL DEFAULT 0,
     created_at       TEXT    NOT NULL
@@ -58,22 +58,16 @@ CREATE TABLE IF NOT EXISTS referees (
     active      INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS ref_availability (
-    referee_id  INTEGER NOT NULL REFERENCES referees(discord_id) ON DELETE CASCADE,
-    week        TEXT    NOT NULL,
-    slots       TEXT    NOT NULL,
-    submitted   INTEGER NOT NULL DEFAULT 0,
-    updated_at  TEXT    NOT NULL,
-    PRIMARY KEY (referee_id, week)
-);
-
-CREATE TABLE IF NOT EXISTS ref_offers (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    fixture_id    INTEGER NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
-    referee_id    INTEGER NOT NULL,
-    state         TEXT    NOT NULL,
-    offered_at    TEXT    NOT NULL,
-    responded_at  TEXT
+-- First-come-first-served officiating. A fixture takes at most one REF claim
+-- and two AR (assistant/VAR) claims - see referees.next_open_role. Claiming is
+-- public and instant: there is no availability to submit and no offer to wait
+-- on, unlike the old ranked-offer system this replaced.
+CREATE TABLE IF NOT EXISTS fixture_referees (
+    fixture_id  INTEGER NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
+    referee_id  INTEGER NOT NULL,
+    role        TEXT    NOT NULL,
+    claimed_at  TEXT    NOT NULL,
+    PRIMARY KEY (fixture_id, referee_id)
 );
 
 CREATE TABLE IF NOT EXISTS log (
@@ -104,16 +98,22 @@ CREATE TABLE IF NOT EXISTS boards (
     updated_at  TEXT    NOT NULL
 );
 
+-- The public, self-updating referee board for a week: every scheduled
+-- fixture grouped by day, plus a trailing claim-menu message. Same shape as
+-- `boards`, and the same reason for it - editing in place beats reposting.
+CREATE TABLE IF NOT EXISTS ref_boards (
+    week        TEXT    PRIMARY KEY,
+    channel_id  INTEGER NOT NULL,
+    message_ids TEXT    NOT NULL,
+    digest      TEXT,
+    updated_at  TEXT    NOT NULL
+);
+
 
 CREATE INDEX IF NOT EXISTS ix_fixtures_week   ON fixtures(week, competition);
 CREATE INDEX IF NOT EXISTS ix_fixtures_status ON fixtures(status);
 CREATE INDEX IF NOT EXISTS ix_log_fixture     ON log(fixture_id, id);
 """
-
-OFFER_OFFERED = "OFFERED"
-OFFER_ACCEPTED = "ACCEPTED"
-OFFER_DECLINED = "DECLINED"
-OFFER_SUPERSEDED = "SUPERSEDED"
 
 
 def now():
@@ -214,12 +214,6 @@ class Store:
             conn.execute("UPDATE fixtures SET status=? WHERE id=?", (status, fixture_id))
         self.note(fixture_id, "status -> {}".format(status), detail)
 
-    def set_referee(self, fixture_id, referee_id):
-        with self._connect() as conn:
-            conn.execute("UPDATE fixtures SET referee_id=? WHERE id=?",
-                         (referee_id, fixture_id))
-        self.note(fixture_id, "referee assigned", str(referee_id))
-
     def mark_reminded(self, fixture_id, which):
         column = {"12h": "reminded_12h", "2h": "reminded_2h"}[which]
         with self._connect() as conn:
@@ -292,78 +286,71 @@ class Store:
         with self._connect() as conn:
             return [dict(r) for r in conn.execute(sql + " ORDER BY name")]
 
-    def save_ref_availability(self, referee_id, week, slots, submitted=False):
-        with self._connect() as conn:
-            conn.execute(
-                """INSERT INTO ref_availability (referee_id, week, slots, submitted, updated_at)
-                   VALUES (?,?,?,?,?)
-                   ON CONFLICT(referee_id, week) DO UPDATE SET
-                       slots=excluded.slots,
-                       submitted=MAX(ref_availability.submitted, excluded.submitted),
-                       updated_at=excluded.updated_at""",
-                (referee_id, week, json.dumps(slots, sort_keys=True),
-                 1 if submitted else 0, now()),
-            )
-
-    def ref_availability(self, referee_id, week):
+    def is_active_referee(self, discord_id):
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM ref_availability WHERE referee_id=? AND week=?",
-                (referee_id, week),
+                "SELECT 1 FROM referees WHERE discord_id=? AND active=1", (discord_id,)
             ).fetchone()
-        if not row:
-            return None
-        record = dict(row)
-        record["slots"] = json.loads(record["slots"])
-        return record
+        return row is not None
 
-    def mark_ref_submitted(self, referee_id, week):
+    def claim_referee(self, fixture_id, referee_id, role):
         with self._connect() as conn:
             conn.execute(
-                "UPDATE ref_availability SET submitted=1, updated_at=? WHERE referee_id=? AND week=?",
-                (now(), referee_id, week),
+                """INSERT INTO fixture_referees (fixture_id, referee_id, role, claimed_at)
+                   VALUES (?,?,?,?)""",
+                (fixture_id, referee_id, role, now()),
             )
+        self.note(fixture_id, "referee claimed", "{} as {}".format(referee_id, role))
+
+    def drop_referee(self, fixture_id, referee_id):
+        """Remove one official from a fixture. Returns whether anything was removed."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM fixture_referees WHERE fixture_id=? AND referee_id=?",
+                (fixture_id, referee_id),
+            )
+            removed = cursor.rowcount > 0
+        if removed:
+            self.note(fixture_id, "referee dropped out", str(referee_id))
+        return removed
+
+    def fixture_referees(self, fixture_id):
+        """Officials on a fixture: the referee first, then assistants in claim order."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM fixture_referees WHERE fixture_id=?
+                   ORDER BY CASE role WHEN 'REF' THEN 0 ELSE 1 END, claimed_at""",
+                (fixture_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def ref_committed_in_slot(self, week, slot_key, referee_id, exclude_fixture=None):
+        """Is this referee already officiating another fixture at this kickoff?
+
+        A hard exclusion: nobody can be in two places at once, regardless of
+        which role they hold on either fixture.
+        """
+        sql = ("SELECT 1 FROM fixture_referees fr JOIN fixtures f ON f.id = fr.fixture_id "
+               "WHERE f.week=? AND f.slot_key=? AND fr.referee_id=?")
+        args = [week, slot_key, referee_id]
+        if exclude_fixture is not None:
+            sql += " AND fr.fixture_id<>?"
+            args.append(exclude_fixture)
+        with self._connect() as conn:
+            return conn.execute(sql, args).fetchone() is not None
 
     # ------------------------------------------------------- ref workload
     def ref_workload(self, week, competition=None):
-        """referee_id -> fixtures already assigned this week.
-
-        Feeds the fair-workload ranking, so the same two refs don't end up
-        doing every game.
-        """
-        sql = ("SELECT referee_id, COUNT(*) AS n FROM fixtures "
-               "WHERE week=? AND referee_id IS NOT NULL")
+        """referee_id -> fixtures officiated (any role) this week, for /refs list."""
+        sql = ("SELECT fr.referee_id, COUNT(*) AS n FROM fixture_referees fr "
+               "JOIN fixtures f ON f.id = fr.fixture_id WHERE f.week=?")
         args = [week]
         if competition:
-            sql += " AND competition=?"
+            sql += " AND f.competition=?"
             args.append(competition)
         with self._connect() as conn:
-            return {r["referee_id"]: r["n"] for r in conn.execute(sql + " GROUP BY referee_id", args)}
-
-    def offer(self, fixture_id, referee_id):
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO ref_offers (fixture_id, referee_id, state, offered_at) VALUES (?,?,?,?)",
-                (fixture_id, referee_id, OFFER_OFFERED, now()),
-            )
-        self.note(fixture_id, "referee offered", str(referee_id))
-
-    def resolve_offer(self, fixture_id, referee_id, state):
-        with self._connect() as conn:
-            conn.execute(
-                """UPDATE ref_offers SET state=?, responded_at=?
-                   WHERE fixture_id=? AND referee_id=? AND state=?""",
-                (state, now(), fixture_id, referee_id, OFFER_OFFERED),
-            )
-        self.note(fixture_id, "referee {}".format(state.lower()), str(referee_id))
-
-    def refs_already_asked(self, fixture_id):
-        """Refs who have already been offered this fixture, so a decline never
-        loops back round to the same person."""
-        with self._connect() as conn:
-            return {r["referee_id"] for r in conn.execute(
-                "SELECT DISTINCT referee_id FROM ref_offers WHERE fixture_id=?", (fixture_id,)
-            )}
+            return {r["referee_id"]: r["n"]
+                    for r in conn.execute(sql + " GROUP BY fr.referee_id", args)}
 
     # ------------------------------------------------- scheduling context
     def slot_load(self, week, competition=None):
@@ -398,79 +385,6 @@ class Store:
             args.append(ignore_fixture)
         with self._connect() as conn:
             return {r["slot_key"] for r in conn.execute(sql, args)}
-
-    # ------------------------------------------- referee allocation context
-    def ref_pending_count(self, week, competition=None):
-        """referee_id -> outstanding offers this week.
-
-        Counted towards a referee's load alongside accepted games. Without it,
-        a batch of fixtures scheduled in one pass would all be offered to
-        whoever currently has the fewest games - flooding one person with
-        offers they then have to decline.
-        """
-        sql = ("SELECT o.referee_id, COUNT(*) AS n FROM ref_offers o "
-               "JOIN fixtures f ON f.id = o.fixture_id "
-               "WHERE o.state = ? AND f.week = ?")
-        args = [OFFER_OFFERED, week]
-        if competition:
-            sql += " AND f.competition = ?"
-            args.append(competition)
-        with self._connect() as conn:
-            return {r["referee_id"]: r["n"]
-                    for r in conn.execute(sql + " GROUP BY o.referee_id", args)}
-
-    def ref_slot_assignments(self, week, competition=None):
-        """slot_key -> {referee_id, ...} already committed to that slot.
-
-        A referee cannot be in two places at once, so this is a hard exclusion
-        rather than a ranking penalty. Pending offers are included: offering
-        someone two fixtures in the same slot means one of them must be
-        withdrawn later.
-        """
-        sql = ("SELECT f.slot_key, f.referee_id AS assigned, o.referee_id AS offered "
-               "FROM fixtures f LEFT JOIN ref_offers o "
-               "  ON o.fixture_id = f.id AND o.state = ? "
-               "WHERE f.week = ? AND f.slot_key IS NOT NULL")
-        args = [OFFER_OFFERED, week]
-        if competition:
-            sql += " AND f.competition = ?"
-            args.append(competition)
-        busy = {}
-        with self._connect() as conn:
-            for row in conn.execute(sql, args):
-                for referee_id in (row["assigned"], row["offered"]):
-                    if referee_id:
-                        busy.setdefault(row["slot_key"], set()).add(referee_id)
-        return busy
-
-    def withdraw_offers(self, fixture_id):
-        """Mark any outstanding offer on a fixture as superseded."""
-        with self._connect() as conn:
-            conn.execute(
-                "UPDATE ref_offers SET state=?, responded_at=? WHERE fixture_id=? AND state=?",
-                (OFFER_SUPERSEDED, now(), fixture_id, OFFER_OFFERED),
-            )
-
-    def fixtures_awaiting_referee(self, week=None, competition=None):
-        """Scheduled, no referee, nobody currently being asked, not yet flagged.
-
-        Lets referee allocation resume after a restart: a fixture whose offer
-        was never sent is picked up on the next pass rather than sitting
-        refereeless until someone notices.
-        """
-        sql = ("SELECT f.* FROM fixtures f WHERE f.slot_key IS NOT NULL "
-               "AND f.referee_id IS NULL AND f.status <> ? "
-               "AND NOT EXISTS (SELECT 1 FROM ref_offers o "
-               "                WHERE o.fixture_id = f.id AND o.state = ?)")
-        args = ["NEEDS_MANUAL_REF", OFFER_OFFERED]
-        if week:
-            sql += " AND f.week = ?"
-            args.append(week)
-        if competition:
-            sql += " AND f.competition = ?"
-            args.append(competition)
-        with self._connect() as conn:
-            return [dict(r) for r in conn.execute(sql + " ORDER BY f.id", args)]
 
     # ------------------------------------------------- published fixture board
     def board(self, week):
@@ -533,6 +447,47 @@ class Store:
     def forget_board(self, week):
         with self._connect() as conn:
             conn.execute("DELETE FROM boards WHERE week=?", (week,))
+
+    # -------------------------------------------------- published referee board
+    def ref_board(self, week):
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM ref_boards WHERE week=?", (week,)).fetchone()
+        return dict(row) if row else None
+
+    def ref_boards(self):
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute("SELECT * FROM ref_boards ORDER BY week")]
+
+    def set_ref_board(self, week, channel_id, message_ids, digest=None):
+        if isinstance(message_ids, int):
+            message_ids = [message_ids]
+        message_ids = list(message_ids)
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO ref_boards (week, channel_id, message_ids, digest, updated_at)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(week) DO UPDATE SET
+                       channel_id=excluded.channel_id,
+                       message_ids=excluded.message_ids,
+                       digest=excluded.digest,
+                       updated_at=excluded.updated_at""",
+                (week, channel_id, json.dumps(message_ids), digest, now()),
+            )
+
+    def ref_board_message_ids(self, week):
+        """Every message id the referee board occupies, oldest first - the
+        claim-menu message is always the last one."""
+        record = self.ref_board(week)
+        if not record:
+            return []
+        try:
+            return [int(x) for x in json.loads(record["message_ids"])]
+        except (ValueError, TypeError):
+            return []
+
+    def forget_ref_board(self, week):
+        with self._connect() as conn:
+            conn.execute("DELETE FROM ref_boards WHERE week=?", (week,))
 
     def unsubmitted_managers(self, fixture_id):
         """Managers on a fixture who have not pressed submit.
@@ -607,6 +562,28 @@ class Store:
                 "SELECT discord_id FROM managers WHERE team=?", (team,)
             ).fetchone()
         return row["discord_id"] if row else None
+
+    def reassign_fixture_managers(self, team, discord_id):
+        """Overwrite the manager snapshot on every existing fixture for `team`.
+
+        set_manager() alone only affects fixtures created afterwards - a
+        fixture freezes its manager id at creation on purpose, so a real
+        mid-season manager change never quietly rewrites history. That
+        freeze is exactly what breaks /test managers when it's re-run after
+        fixtures already exist: the mapping table moves on, but the old
+        manager id stays trapped on those fixtures, still blocking them from
+        refereeing their own "old" game. Test-only: never call this from a
+        real staff command.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE fixtures SET home_manager_id=? WHERE home_team=?",
+                (discord_id, team),
+            )
+            conn.execute(
+                "UPDATE fixtures SET away_manager_id=? WHERE away_team=?",
+                (discord_id, team),
+            )
 
     def managers(self):
         with self._connect() as conn:

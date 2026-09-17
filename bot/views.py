@@ -28,77 +28,57 @@ from .selector import SelectorState, describe_choice
 # cannot act on another's selector by replaying a custom_id.
 #
 #   av:fx:1024:sat_1800      slot button, manager on fixture 1024
-#   av:rw:2026-09-12:sat_1800   slot button, referee for that week
 #   avd:fx:1024:1            switch to day index 1
 #   avs:fx:1024              submit
 #   avc:fx:1024              clear
+#
+# The "fx" scope segment is a holdover from when referees answered a weekly
+# selector through this same machinery (scope "rw"). That path is gone -
+# referees now claim games directly, see ref_views.py - but the segment stays
+# in the id format so buttons already posted before this change keep routing.
 # --------------------------------------------------------------------------
 
 SCOPE_FIXTURE = "fx"
-SCOPE_REF_WEEK = "rw"
 
 _REF = r"[\w.-]+"
 
 
 class Target:
-    """Where a selector's answers are stored.
-
-    Managers answer per fixture; referees answer per week. Both use the same
-    buttons, so the difference is isolated here.
-    """
+    """A manager's fixture: where a selector's answers are stored."""
 
     def __init__(self, scope, ref):
         self.scope = scope
         self.ref = str(ref)
 
-    @property
-    def is_fixture(self):
-        return self.scope == SCOPE_FIXTURE
-
     def load(self, store, user_id):
-        if self.is_fixture:
-            record = store.submission(int(self.ref), user_id)
-        else:
-            record = store.ref_availability(user_id, self.ref)
+        record = store.submission(int(self.ref), user_id)
         if not record:
             return {}, False
         return record["slots"], bool(record["submitted"])
 
     def save(self, store, user_id, picks, submitted=False):
-        if self.is_fixture:
-            store.save_submission(int(self.ref), user_id, picks, submitted=submitted)
-        else:
-            store.save_ref_availability(user_id, self.ref, picks, submitted=submitted)
+        store.save_submission(int(self.ref), user_id, picks, submitted=submitted)
 
     def mark_submitted(self, store, user_id):
-        if self.is_fixture:
-            store.mark_submitted(int(self.ref), user_id)
-        else:
-            store.mark_ref_submitted(user_id, self.ref)
+        store.mark_submitted(int(self.ref), user_id)
 
     def may_answer(self, store, user_id):
-        """Only the two managers of a fixture, or a registered referee."""
-        if self.is_fixture:
-            fixture = store.fixture(int(self.ref))
-            if not fixture:
-                return False
-            return user_id in (fixture["home_manager_id"], fixture["away_manager_id"])
-        return any(r["discord_id"] == user_id for r in store.referees())
+        """Only the two managers of the fixture."""
+        fixture = store.fixture(int(self.ref))
+        if not fixture:
+            return False
+        return user_id in (fixture["home_manager_id"], fixture["away_manager_id"])
 
     def heading(self, store):
-        if self.is_fixture:
-            fixture = store.fixture(int(self.ref))
-            if not fixture:
-                return "Fixture not found"
-            return "#{} · {} vs {}".format(
-                fixture["id"], fixture["home_team"], fixture["away_team"]
-            )
-        return "Referee availability · week of {}".format(self.ref)
+        fixture = store.fixture(int(self.ref))
+        if not fixture:
+            return "Fixture not found"
+        return "#{} · {} vs {}".format(
+            fixture["id"], fixture["home_team"], fixture["away_team"]
+        )
 
     def closed(self, store):
         """Why answering is no longer possible, or None."""
-        if not self.is_fixture:
-            return None
         fixture = store.fixture(int(self.ref))
         if not fixture:
             return "That fixture no longer exists."
@@ -203,7 +183,7 @@ class _SelectorButton:
 class SlotButton(
     _SelectorButton,
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"av:(?P<scope>fx|rw):(?P<ref>[\w.-]+):(?P<slot>\w+)",
+    template=r"av:(?P<scope>fx):(?P<ref>[\w.-]+):(?P<slot>\w+)",
 ):
     def __init__(self, target, slot, pref, row=1):
         self.target = target
@@ -240,7 +220,7 @@ class SlotButton(
 class DayButton(
     _SelectorButton,
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"avd:(?P<scope>fx|rw):(?P<ref>[\w.-]+):(?P<day>\d+)",
+    template=r"avd:(?P<scope>fx):(?P<ref>[\w.-]+):(?P<day>\d+)",
 ):
     def __init__(self, target, index, day, active=False, row=0):
         self.target = target
@@ -275,7 +255,7 @@ class DayButton(
 class SubmitButton(
     _SelectorButton,
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"avs:(?P<scope>fx|rw):(?P<ref>[\w.-]+)",
+    template=r"avs:(?P<scope>fx):(?P<ref>[\w.-]+)",
 ):
     def __init__(self, target, row=4):
         self.target = target
@@ -322,7 +302,7 @@ class SubmitButton(
 class ClearButton(
     _SelectorButton,
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"avc:(?P<scope>fx|rw):(?P<ref>[\w.-]+)",
+    template=r"avc:(?P<scope>fx):(?P<ref>[\w.-]+)",
 ):
     def __init__(self, target, row=4):
         self.target = target
@@ -355,7 +335,7 @@ DYNAMIC_ITEMS = (SlotButton, DayButton, SubmitButton, ClearButton)
 class OpenButton(
     _SelectorButton,
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"avo:(?P<scope>fx|rw):(?P<ref>[\w.-]+)",
+    template=r"avo:(?P<scope>fx):(?P<ref>[\w.-]+)",
 ):
     """Opens the selector from a DM.
 

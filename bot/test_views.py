@@ -24,7 +24,7 @@ from bot.scheduling import Pref
 from bot.selector import SelectorState
 from bot.slots import Slot, clean_day, slot_key
 from bot.views import (
-    DYNAMIC_ITEMS, SCOPE_FIXTURE, SCOPE_REF_WEEK,
+    DYNAMIC_ITEMS, SCOPE_FIXTURE,
     ClearButton, DayButton, OpenButton, SlotButton, SubmitButton, Target,
     build_view, opener,
 )
@@ -60,7 +60,6 @@ for index, day in enumerate(["Saturday", "Sunday", "Friday (Low Priority)"]):
                           minutes=slot.minutes, low_priority=(index == 2)))
 
 FIXTURE_TARGET = Target(SCOPE_FIXTURE, 1024)
-WEEK_TARGET = Target(SCOPE_REF_WEEK, "2026-09-12")
 
 
 # --------------------------------------------------------------------------
@@ -77,16 +76,14 @@ def emitted_ids(target):
     ]
 
 
-for target, what in ((FIXTURE_TARGET, "fixture"), (WEEK_TARGET, "ref week")):
-    for cls, custom_id in emitted_ids(target):
-        pattern = cls.__discord_ui_compiled_template__
-        check("{:<12} {:<14} routes: {}".format(what, cls.__name__, custom_id),
-              bool(pattern.fullmatch(custom_id)), True)
+for cls, custom_id in emitted_ids(FIXTURE_TARGET):
+    pattern = cls.__discord_ui_compiled_template__
+    check("{:<14} routes: {}".format(cls.__name__, custom_id),
+          bool(pattern.fullmatch(custom_id)), True)
 
 print("\nids stay inside Discord's 100-character cap")
-for target, what in ((FIXTURE_TARGET, "fixture"), (WEEK_TARGET, "ref week")):
-    longest = max(len(cid) for _, cid in emitted_ids(target))
-    check("{} longest id is {} chars".format(what, longest), longest <= 100, True)
+longest = max(len(cid) for _, cid in emitted_ids(FIXTURE_TARGET))
+check("longest id is {} chars".format(longest), longest <= 100, True)
 
 print("\nthe captured groups come back with the right values")
 slot_id = SlotButton(FIXTURE_TARGET, SLOTS[0], Pref.NO).custom_id
@@ -94,11 +91,6 @@ match = SlotButton.__discord_ui_compiled_template__.fullmatch(slot_id)
 check("scope", match["scope"], "fx")
 check("ref", match["ref"], "1024")
 check("slot", match["slot"], SLOTS[0].key)
-
-week_slot_id = SlotButton(WEEK_TARGET, SLOTS[0], Pref.NO).custom_id
-week_match = SlotButton.__discord_ui_compiled_template__.fullmatch(week_slot_id)
-check("a dated week survives the id", week_match["ref"], "2026-09-12")
-check("scope for refs", week_match["scope"], "rw")
 
 print("\ntemplates don't overlap - one id must route to exactly one button type")
 for _, custom_id in emitted_ids(FIXTURE_TARGET):
@@ -159,16 +151,9 @@ check("still at most 5 rows", max(dense_counts) <= 4, True)
 # --------------------------------------------------------------------------
 print("\nonly the fixture's own managers may answer")
 # --------------------------------------------------------------------------
-class RefStore(FakeStore):
-    def referees(self):
-        return [{"discord_id": 901, "name": "Ref One"}]
-
-
 check("home manager may", FIXTURE_TARGET.may_answer(FakeStore(), 111), True)
 check("away manager may", FIXTURE_TARGET.may_answer(FakeStore(), 222), True)
 check("a stranger may not", FIXTURE_TARGET.may_answer(FakeStore(), 999), False)
-check("registered ref may", WEEK_TARGET.may_answer(RefStore(), 901), True)
-check("unregistered ref may not", WEEK_TARGET.may_answer(RefStore(), 902), False)
 
 print("\nan already-scheduled fixture is closed to edits")
 class ScheduledStore(FakeStore):
@@ -181,7 +166,6 @@ class ScheduledStore(FakeStore):
 check("closed with a reason",
       "already scheduled" in FIXTURE_TARGET.closed(ScheduledStore()), True)
 check("open while unscheduled", FIXTURE_TARGET.closed(FakeStore()), None)
-check("ref weeks never close", WEEK_TARGET.closed(FakeStore()), None)
 
 # --------------------------------------------------------------------------
 print("\nthe DM opener button")
@@ -197,7 +181,6 @@ check("a slot id does not match the opener template",
 view_dm = opener(FIXTURE_TARGET)
 check("one button on the DM view", len(view_dm.children), 1)
 check("labelled for a human", view_dm.children[0].item.label, "Set availability")
-check("works for ref weeks too", OpenButton(WEEK_TARGET).custom_id, "avo:rw:2026-09-12")
 
 print("")
 if FAILURES:

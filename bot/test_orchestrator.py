@@ -17,7 +17,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 
 from bot.db import Store
-from bot.orchestrator import Action, advance, dashboard, run_once
+from bot.orchestrator import Action, advance, dashboard, run_once, run_once_randomly
 from bot.scheduling import Pref, Source, Status
 from bot.slots import Slot, clean_day, slot_key
 from bot.weeks import (
@@ -271,12 +271,45 @@ store.set_status(fid, Status.NEEDS_MANUAL_SCHEDULING, "no overlap")
 check("not reprocessed", run_once(store, FakeTimings(sheet), week=WEEK, now=AFTER), [])
 
 # --------------------------------------------------------------------------
+print("\nrun_once_randomly: testing-only instant scheduling")
+# --------------------------------------------------------------------------
+store = fresh_store()
+ids = [new_fixture(store, home="T{} FC".format(n), away="O{} FC".format(n),
+                   home_id=2000 + n, away_id=2100 + n) for n in range(4)]
+outcomes = run_once_randomly(store, FakeTimings(), week=WEEK)
+check("every fixture scheduled", [o.action for o in outcomes], [Action.SCHEDULED] * 4)
+check("every slot is one of the real ones",
+      {store.fixture(i)["slot_key"] for i in ids} <= {s.key for s in SLOTS}, True)
+check("tagged with the TEST source",
+      {store.fixture(i)["schedule_source"] for i in ids}, {Source.TEST})
+check("the log says it was test mode, not a real fallback",
+      all(any(h["event"] == "test mode" for h in store.history(i)) for i in ids), True)
+
+print("\nrun_once_randomly ignores fixtures that are already scheduled")
+store = fresh_store()
+already = new_fixture(store)
+store.set_schedule(already, "sat_1700", Source.MANAGER_PREFERENCES, Status.SCHEDULED)
+check("untouched", run_once_randomly(store, FakeTimings(), week=WEEK), [])
+check("original slot kept", store.fixture(already)["slot_key"], "sat_1700")
+
+print("\nrun_once_randomly still won't double-book a team")
+store = fresh_store()
+first = new_fixture(store, home="SAME FC", away="A1 FC", home_id=1, away_id=2)
+run_once_randomly(store, FakeTimings(), week=WEEK)
+taken = store.fixture(first)["slot_key"]
+second = new_fixture(store, home="SAME FC", away="A2 FC", home_id=1, away_id=3)
+run_once_randomly(store, FakeTimings(), week=WEEK)
+check("the shared team's second fixture avoids its first slot",
+      store.fixture(second)["slot_key"] != taken, True)
+
+# --------------------------------------------------------------------------
 print("\nthe staff dashboard buckets fixtures by what needs a human")
 # --------------------------------------------------------------------------
 store = fresh_store()
 confirmed = new_fixture(store, home="C1", away="C2", home_id=1, away_id=2)
 store.set_schedule(confirmed, "sat_1800", Source.MANAGER_PREFERENCES, Status.SCHEDULED)
-store.set_referee(confirmed, 901)
+store.add_referee(901, "Ref One")
+store.claim_referee(confirmed, 901, "REF")
 store.set_status(confirmed, Status.FULLY_CONFIRMED)
 
 needs_ref = new_fixture(store, home="R1", away="R2", home_id=3, away_id=4)

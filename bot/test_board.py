@@ -80,10 +80,15 @@ def build_week(store, count, confirmed=True):
         )
         store.set_schedule(fid, slot.key, Source.MANAGER_PREFERENCES, Status.SCHEDULED)
         if confirmed:
-            store.set_referee(fid, 900 + (n % 5))
+            store.add_referee(900 + (n % 5), "Ref {}".format(900 + (n % 5)))
+            store.claim_referee(fid, 900 + (n % 5), "REF")
             store.set_status(fid, Status.FULLY_CONFIRMED)
         ids.append(fid)
     return ids
+
+
+def roster_of(store, fixtures):
+    return {f["id"]: store.fixture_referees(f["id"]) for f in fixtures}
 
 
 # --------------------------------------------------------------------------
@@ -92,16 +97,25 @@ print("\none row of the master list")
 store = fresh_store()
 fid = build_week(store, 1)[0]
 fixture = store.fixture(fid)
-row = board_row(fixture, slot_for(fixture["slot_key"]), referee_name="Ref One")
+row = board_row(fixture, slot_for(fixture["slot_key"]), roster=store.fixture_referees(fid),
+                referee_names={900: "Ref One"})
 check("names both teams", "TEAM 0 FC" in row and "OPPO 0 FC" in row, True)
 check("uses the vs format", " *vs* " in row, True)
 check("localised timestamp", "<t:" in row and ":F>" in row, True)
 check("names the referee", "Ref One" in row, True)
 
+print("\nassistants are folded into a +N rather than named")
+store.add_referee(910, "Assistant One")
+store.claim_referee(fid, 910, "AR")
+plus_one = board_row(fixture, slot_for(fixture["slot_key"]), roster=store.fixture_referees(fid),
+                     referee_names={900: "Ref One", 910: "Assistant One"})
+check("shows the referee plus a count", "Ref One (+1 AR)" in plus_one, True)
+
 print("\nan unreffed fixture shows a dash rather than a blank")
 store = fresh_store()
 fid = build_week(store, 1, confirmed=False)[0]
-unreffed = board_row(store.fixture(fid), slot_for(store.fixture(fid)["slot_key"]))
+unreffed = board_row(store.fixture(fid), slot_for(store.fixture(fid)["slot_key"]),
+                     roster=store.fixture_referees(fid))
 check("no ref shown until one is assigned", "-#" in unreffed, False)
 
 # --------------------------------------------------------------------------
@@ -191,8 +205,8 @@ confirmed = build_week(store, 3)[0]
 needs_ref = store.create_fixture("S17_Clubs", WEEK, "R1 FC", "R2 FC", 31, 32,
                                  "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY)
 store.set_schedule(needs_ref, "sat_1800", Source.AUTO_FALLBACK, Status.SCHEDULED)
-store.offer(needs_ref, 901)
-store.resolve_offer(needs_ref, 901, "DECLINED")
+store.add_referee(901, "Ref 901")
+store.claim_referee(needs_ref, 901, "AR")   # an assistant claimed it, but no referee yet
 
 stuck = store.create_fixture("S17_Clubs", WEEK, "S1 FC", "S2 FC", 41, 42,
                              "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY)
@@ -205,8 +219,8 @@ store.save_submission(waiting, 51, {"sat_1800": 2}, submitted=True)   # only hom
 buckets = dashboard(store, week=WEEK)
 waiting_on = {f["id"]: store.unsubmitted_managers(f["id"]) for f in store.fixtures(week=WEEK)}
 reasons = {stuck: "no overlapping availability"}
-asked = {f["id"]: store.refs_already_asked(f["id"]) for f in store.fixtures(week=WEEK)}
-body = dashboard_summary(buckets, WEEK, waiting_on, reasons, asked)
+rosters = roster_of(store, store.fixtures(week=WEEK))
+body = dashboard_summary(buckets, WEEK, waiting_on, reasons, rosters)
 
 check("counts confirmed", "**3** fully confirmed" in body, True)
 check("counts awaiting", "**1** awaiting response" in body, True)
@@ -215,7 +229,8 @@ check("counts no valid time", "**1** no valid time" in body, True)
 check("names the manager who hasn't replied", "<@52>" in body, True)
 check("does not chase the one who did", "<@51>" not in body, True)
 check("gives the blocking reason", "no overlapping availability" in body, True)
-check("says how many refs were already asked", "1 already asked" in body, True)
+check("says how many assistants were already claimed",
+      "1 assistant(s) already claimed" in body, True)
 check("tells staff the fix for scheduling", "/fixture set" in body, True)
 check("tells staff the fix for refs", "/refs assign" in body, True)
 check("fits Discord's limit", len(body) <= DISCORD_LIMIT, True)
@@ -275,9 +290,10 @@ for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
         store.set_schedule(fid, SLOTS[n % len(SLOTS)].key,
                            Source.MANAGER_PREFERENCES, Status.SCHEDULED)
         store.add_referee(800 + n, "Referee Number {}".format(n))
-        store.set_referee(fid, 800 + n)
+        store.claim_referee(fid, 800 + n, "REF")
 real_names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
-real = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, real_names,
+real = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, referee_names=real_names,
+                     rosters=roster_of(store, store.fixtures(week=WEEK)),
                      gameweek=gw1, deadline=gw1.deadline)
 check("every message within the limit", all(len(b) <= DISCORD_LIMIT for b in real), True)
 check("all 20 rendered", sum(b.count(" *vs* ") for b in real), 20)
@@ -306,9 +322,10 @@ try:
         store.set_schedule(fid, SLOTS[n % len(SLOTS)].key,
                            Source.MANAGER_PREFERENCES, Status.SCHEDULED)
         store.add_referee(700 + n, "Referee Longname {}".format(n))
-        store.set_referee(fid, 700 + n)
+        store.claim_referee(fid, 700 + n, "REF")
     badge_names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
-    badged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, badge_names,
+    badged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, referee_names=badge_names,
+                           rosters=roster_of(store, store.fixtures(week=WEEK)),
                            gameweek=gw1, deadline=gw1.deadline)
     check("still within the limit with all 40 badges",
           all(len(b) <= DISCORD_LIMIT for b in badged), True)

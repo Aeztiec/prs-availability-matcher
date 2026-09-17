@@ -21,7 +21,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .scheduling import Status, schedule_from_preferences, schedule_from_sheet
+from .referees import ROLE_REF
+from .scheduling import (
+    Status, schedule_from_preferences, schedule_from_sheet, schedule_randomly,
+)
 from .weeks import from_iso, reminders_due, utcnow
 
 
@@ -148,7 +151,7 @@ def _fallback(timings, fixture, load, busy, rng):
     )
 
 
-def _apply(store, fixture, decision, detail=""):
+def _apply(store, fixture, decision, detail="", note="fallback used"):
     fixture_id = fixture["id"]
     everyone = [fixture["home_manager_id"], fixture["away_manager_id"]]
 
@@ -159,7 +162,7 @@ def _apply(store, fixture, decision, detail=""):
 
     store.set_schedule(fixture_id, decision.slot.key, decision.source, decision.status)
     if detail:
-        store.note(fixture_id, "fallback used", detail)
+        store.note(fixture_id, note, detail)
     return Outcome(Action.SCHEDULED, fixture_id, decision=decision,
                    notify=everyone, detail=detail or decision.reason)
 
@@ -181,6 +184,25 @@ def run_once(store, timings, week=None, competition=None, now=None, rng=None):
     return outcomes
 
 
+def run_once_randomly(store, timings, week=None, competition=None, rng=None):
+    """Give every still-unscheduled fixture a random kickoff time. Testing only.
+
+    Skips waiting on managers, deadlines and sheet availability entirely - the
+    only thing still respected is that a team can't play two games in the same
+    slot. Lets staff fill a whole gameweek in one command to exercise referee
+    claiming, the board and the dashboard without real submissions.
+    """
+    outcomes = []
+    for fixture in store.fixtures(week=week, competition=competition):
+        if fixture["slot_key"]:
+            continue
+        load, busy = _context(store, fixture)
+        decision = schedule_randomly(timings.slots, load=load, busy=busy, rng=rng)
+        outcomes.append(_apply(store, fixture, decision,
+                               detail="random slot for testing", note="test mode"))
+    return outcomes
+
+
 def dashboard(store, week=None, competition=None):
     """The exception monitor from the spec's step 16."""
     fixtures = store.fixtures(week=week, competition=competition)
@@ -193,7 +215,8 @@ def dashboard(store, week=None, competition=None):
         elif fixture["status"] == Status.NEEDS_MANUAL_SCHEDULING:
             buckets["no_valid_time"].append(fixture)
         elif fixture["status"] == Status.NEEDS_MANUAL_REF or (
-            fixture["slot_key"] and not fixture["referee_id"]
+            fixture["slot_key"] and
+            not any(r["role"] == ROLE_REF for r in store.fixture_referees(fixture["id"]))
         ):
             buckets["ref_needed"].append(fixture)
         else:

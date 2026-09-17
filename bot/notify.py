@@ -14,6 +14,7 @@ import hashlib
 from datetime import timedelta
 
 from . import season
+from .referees import MAX_ASSISTANTS, ROLE_AR, ROLE_REF
 from .scheduling import Source
 
 from .weeks import discord_time, from_iso, slot_datetime, week_saturday
@@ -79,7 +80,7 @@ def reminder(fixture, deadline_iso, which, managers=()):
     return "\n".join(lines)
 
 
-def fixture_confirmed(fixture, slot, referee_name=None):
+def fixture_confirmed(fixture, slot, roster=()):
     lines = [
         "# ⚽ Fixture confirmed",
         "**{}** vs **{}**  ·  #{}".format(
@@ -87,11 +88,8 @@ def fixture_confirmed(fixture, slot, referee_name=None):
         ),
         "",
         _slot_line(fixture["week"], slot),
+        _roster_line(roster),
     ]
-    if referee_name:
-        lines.append("Referee: **{}**".format(referee_name))
-    else:
-        lines.append("Referee: _still being assigned_")
     if fixture.get("schedule_source") == Source.AUTO_FALLBACK:
         lines += [
             "",
@@ -102,43 +100,112 @@ def fixture_confirmed(fixture, slot, referee_name=None):
     return "\n".join(lines)
 
 
-def referee_offer(fixture, slot, referee_id=None):
-    """A referee assignment, posted in a channel and addressed to one person.
+def _roster_line(roster):
+    """Referee: @X   ·   Assistants: @Y, _open_ - always both roles shown."""
+    ref = next((r for r in roster if r["role"] == ROLE_REF), None)
+    ars = [r for r in roster if r["role"] == ROLE_AR]
+    ar_names = ["<@{}>".format(a["referee_id"]) for a in ars]
+    ar_names += ["_open_"] * (MAX_ASSISTANTS - len(ar_names))
+    return "Referee: {}   ·   Assistants: {}".format(
+        "<@{}>".format(ref["referee_id"]) if ref else "_open_",
+        ", ".join(ar_names),
+    )
 
-    The buttons only work for whoever was actually offered it, so posting
-    publicly is safe - and it reaches referees with DMs closed, who would
-    otherwise never see the assignment at all.
+
+LEAGUE_TAG_WIDTH = len("DOMESTIC")
+
+
+def _league_tag(league):
+    """(DOMESTIC) or (UEFA), same width either way.
+
+    Discord doesn't render ordinary text in monospace, so two labels of
+    different lengths would push each row's badges to a different starting
+    point. Padding the word to a fixed width inside a backtick span keeps
+    every row lined up regardless of which one it is.
     """
-    lines = ["## 👨‍⚖️ Referee needed"]
-    if referee_id:
-        lines.append("<@{}>, can you take this fixture?".format(referee_id))
-    lines += [
-        "",
-        "**{}** vs **{}**  ·  #{}".format(
-            fixture["home_team"], fixture["away_team"], fixture["id"]
-        ),
-        _slot_line(fixture["week"], slot),
-        "",
-        "-# Only the referee named above can use these buttons.",
-    ]
-    return "\n".join(lines)
+    if not league:
+        return ""
+    label = "DOMESTIC" if league in season.LEAGUES else "UEFA"
+    return "`({})` ".format(label.center(LEAGUE_TAG_WIDTH))
 
 
-def referee_confirmed(fixture, slot, referee_id=None):
-    """Posted when a referee is locked in, addressed to them by mention."""
-    lines = ["## 👨‍⚖️ Referee confirmed"]
-    if referee_id:
-        lines.append("<@{}> is refereeing this one.".format(referee_id))
-    lines += [
+def referee_board_row(fixture, slot, week, roster=()):
+    """One line: league tag, two badges, kickoff, then whoever has it so far.
+
+    Mentions rather than names - unlike the compact fixture board, this one
+    exists specifically to be claimed, so pinging whoever is already on it is
+    the point rather than something to avoid.
+    """
+    home = season.label_for(fixture["home_team"])
+    away = season.label_for(fixture["away_team"])
+    when = discord_time(slot_datetime(week, slot), "F")
+    tag = _league_tag(fixture.get("league"))
+    who = " ".join("<@{}>".format(r["referee_id"]) for r in roster) if roster else "_open_"
+    return "{}{} *vs* {} @ {}  ·  {}".format(tag, home, away, when, who)
+
+
+def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
+                  competition=None, mention=None):
+    """The public, self-updating referee board: every fixture with a kickoff
+    time, grouped by calendar day and sorted chronologically within it.
+
+    A fixture still marked TBD is left off entirely - there's nothing to claim
+    until it has a time. The claim menu itself is a separate message below
+    this one; this board only ever shows state, never a call to action.
+    """
+    rosters = rosters or {}
+
+    by_day = {}
+    for fixture in fixtures:
+        if not fixture["slot_key"]:
+            continue
+        slot = slot_for(fixture["slot_key"])
+        if not slot:
+            continue
+        moment = slot_datetime(week, slot)
+        by_day.setdefault(moment.date(), []).append((moment, fixture, slot))
+
+    parts = ["PRS", season.SEASON_LABEL]
+    if competition:
+        parts.append(competition.upper())
+    parts.append((gameweek.label if gameweek else "FIXTURES").upper())
+    header = "**__{}:__**".format(" ".join(parts))
+    if season.usable_emoji(season.SEASON_EMOJI):
+        header = "{}  {}".format(header, season.SEASON_EMOJI)
+
+    lines = (["||{}||".format(mention), ""] if mention else []) + [header, ""]
+
+    if not by_day:
+        lines += ["_No fixtures have a kickoff time yet._", ""]
+    for day in sorted(by_day):
+        lines.append("**__{} {} {}:__**  📅".format(
+            day.strftime("%A"), day.day, day.strftime("%B")
+        ))
+        for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0]):
+            lines.append(referee_board_row(fixture, slot, week, rosters.get(fixture["id"])))
+        lines.append("")
+
+    footer = ["-# Times show in your own timezone. This board updates itself "
+             "as games are claimed."]
+    return _chunk(lines, footer=footer)
+
+
+def referee_claim_prompt(open_count):
+    """The message under the board that carries the claim menu."""
+    if open_count == 0:
+        return "\n".join([
+            "**__Referees:__**",
+            "",
+            "Every game above is fully staffed. ✅",
+        ])
+    return "\n".join([
+        "**__Referees, claim a game:__**",
         "",
-        "**{}** vs **{}**  ·  #{}".format(
-            fixture["home_team"], fixture["away_team"], fixture["id"]
-        ),
-        _slot_line(fixture["week"], slot),
+        "Pick an open game from the menu below to take it. First come, first "
+        "served - one referee and up to two assistants per game.",
         "",
-        FOOTER,
-    ]
-    return "\n".join(lines)
+        "-# {} game(s) still need officiating.".format(open_count),
+    ])
 
 
 def no_valid_time(fixture, reason):
@@ -176,26 +243,34 @@ SOURCE_SHORT = {
 }
 
 
-def board_row(fixture, slot, referee_name=None):
+def board_row(fixture, slot, roster=None, referee_names=None):
     """One fixture line: two badges, then the kickoff.
 
     Badges only, no team names - that is how the league's own posts read, and
     at forty fixtures the names are what pushes a gameweek over Discord's
     message limit. A team with no badge configured falls back to its name,
     since an empty side would leave the row meaningless.
+
+    The referee's name is shown, not a mention - a row of @-mentions across a
+    forty-fixture board would ping-highlight the whole thing. Assistants are
+    folded into a "+N" rather than named, to keep the row to one line.
     """
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
     when = (discord_time(slot_datetime(fixture["week"], slot), "F")
             if slot else "`TBD`")
     line = "{} *vs* {} @ {}".format(home, away, when)
-    if referee_name:
-        line += "  -# {}".format(referee_name)
+    referee_names = referee_names or {}
+    ref = next((r for r in (roster or []) if r["role"] == ROLE_REF), None)
+    if ref:
+        name = referee_names.get(ref["referee_id"], "referee")
+        extra = len(roster) - 1
+        line += "  -# {}{}".format(name, " (+{} AR)".format(extra) if extra else "")
     return line
 
 
-def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
-                  deadline=None, mention=None, competition=None):
+def fixture_board(fixtures, week, slot_for, referee_names=None, rosters=None,
+                  gameweek=None, deadline=None, mention=None, competition=None):
     """The public fixture announcement, grouped by division.
 
     Every fixture appears, scheduled or not. It is edited in place as times get
@@ -204,6 +279,7 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
     they read instead.
     """
     referee_names = referee_names or {}
+    rosters = rosters or {}
 
     by_league = {}
     for fixture in fixtures:
@@ -250,7 +326,7 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, gameweek=None,
         for fixture in sorted(rows, key=sort_key):
             lines.append(board_row(
                 fixture, slot_for(fixture["slot_key"]) if fixture["slot_key"] else None,
-                referee_names.get(fixture["referee_id"]),
+                roster=rosters.get(fixture["id"]), referee_names=referee_names,
             ))
         lines.append("")
 
@@ -411,7 +487,7 @@ def fixture_picker(fixtures):
 # the staff dashboard (spec step 16)
 # --------------------------------------------------------------------------
 
-def dashboard_summary(buckets, week, waiting_on=None, reasons=None, asked=None):
+def dashboard_summary(buckets, week, waiting_on=None, reasons=None, rosters=None):
     """The exception monitor from spec step 16.
 
     Counts first, then only what needs a human - and for each of those, who or
@@ -420,7 +496,7 @@ def dashboard_summary(buckets, week, waiting_on=None, reasons=None, asked=None):
     """
     waiting_on = waiting_on or {}
     reasons = reasons or {}
-    asked = asked or {}
+    rosters = rosters or {}
 
     counts = [
         ("🟢", len(buckets["confirmed"]), "fully confirmed"),
@@ -444,12 +520,14 @@ def dashboard_summary(buckets, week, waiting_on=None, reasons=None, asked=None):
     if buckets["ref_needed"]:
         lines += ["", "🟠 **Ref needed**"]
         for fixture in buckets["ref_needed"][:8]:
-            been_asked = asked.get(fixture["id"]) or []
-            tail = "  -# {} already asked".format(len(been_asked)) if been_asked else ""
+            assistants = [r for r in (rosters.get(fixture["id"]) or []) if r["role"] == ROLE_AR]
+            tail = ("  -# {} assistant(s) already claimed".format(len(assistants))
+                    if assistants else "")
             lines.append("· **#{}** {} v {}: {}{}".format(
                 fixture["id"], fixture["home_team"], fixture["away_team"],
                 fixture["slot_key"] or "no time", tail))
-        lines.append("-# Fix with `/refs assign fixture:<id> user:@ref`")
+        lines.append("-# Claim it in the referee channel, or fix by hand with "
+                     "`/refs assign fixture:<id> user:@ref`")
 
     if buckets["awaiting"]:
         lines += ["", "🟡 **Awaiting response**"]
@@ -469,7 +547,7 @@ def dashboard_summary(buckets, week, waiting_on=None, reasons=None, asked=None):
     return "\n".join(lines)
 
 
-def fixture_detail(fixture, history, slot=None):
+def fixture_detail(fixture, history, slot=None, roster=()):
     lines = [
         "# Fixture #{}".format(fixture["id"]),
         "**{}** vs **{}**".format(fixture["home_team"], fixture["away_team"]),
@@ -481,8 +559,8 @@ def fixture_detail(fixture, history, slot=None):
     if slot:
         lines.append("Kickoff: {}".format(_slot_line(fixture["week"], slot)))
         lines.append("Chosen by: `{}`".format(fixture["schedule_source"]))
-    if fixture["referee_id"]:
-        lines.append("Referee: <@{}>".format(fixture["referee_id"]))
+    if roster:
+        lines.append(_roster_line(roster))
 
     if history:
         lines += ["", "**Scheduling log**"]

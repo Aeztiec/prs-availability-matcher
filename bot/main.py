@@ -22,14 +22,14 @@ from discord import app_commands
 from discord.ext import tasks
 
 from . import config, notify, referees, season
-from .db import OFFER_ACCEPTED, OFFER_DECLINED, Store
-from .ref_views import REF_DYNAMIC_ITEMS, offer_view
+from .db import Store
+from .ref_views import REF_DYNAMIC_ITEMS, ClaimSelect, claim_options
 from .fallback import Timings
-from .orchestrator import Action, dashboard, run_once
+from .orchestrator import Action, dashboard, run_once, run_once_randomly
 from .scheduling import Status
 from .selector import fits_on_one_message, SelectorState
 from .views import (
-    DYNAMIC_ITEMS, SCOPE_FIXTURE, SCOPE_REF_WEEK, Target, availability_button,
+    DYNAMIC_ITEMS, SCOPE_FIXTURE, Target, availability_button,
     opener, open_selector,
 )
 from .weeks import (
@@ -210,17 +210,14 @@ class PRSBot(discord.Client):
                 log.warning("fixture %s needs manual scheduling: %s",
                             fixture["id"], outcome.detail)
 
-        # Anything with a time but no referee - including fixtures scheduled
-        # before a restart, whose offer never went out.
-        for fixture in self.store.fixtures_awaiting_referee(week=week):
-            slot = self.slot(fixture["slot_key"])
-            if slot:
-                await self.offer_referee(fixture, slot)
-
-        # Keep any published board in step with what just changed.
+        # Keep any published fixture board and referee board in step with
+        # whatever just changed - a newly scheduled kickoff, or a claim.
         for record in ([self.store.board(week)] if week else self.store.boards()):
             if record:
                 await self.refresh_board(record["week"])
+        for record in ([self.store.ref_board(week)] if week else self.store.ref_boards()):
+            if record:
+                await self.refresh_ref_board(record["week"])
 
     def slot(self, key):
         return next((s for s in self.slots if s.key == key), None)
@@ -231,38 +228,115 @@ class PRSBot(discord.Client):
         Not the next calendar Saturday. Those differ whenever a gameweek is
         more than a few days out - today's calendar week is 2026-09-12 while
         GW1 plays the weekend of 2026-09-19 - and defaulting to the calendar
-        week made /fixture list and /refs availability quietly look at a
-        weekend with nothing in it.
+        week made /fixture list and /refs board quietly look at a weekend
+        with nothing in it.
         """
         gw = season.current(utcnow())
         return gw.week if gw else week_of(utcnow())
 
-    async def offer_referee(self, fixture, slot, attempts=12):
-        """Ask referees in ranked order until one is reachable.
+    def fixtures_needing_referee(self, week=None):
+        """(fixture, roster) pairs for scheduled fixtures not yet fully staffed."""
+        fixtures = self.store.fixtures(week=week) if week else self.store.fixtures()
+        pending = []
+        for fixture in fixtures:
+            if not fixture["slot_key"] or fixture["status"] == Status.NEEDS_MANUAL_SCHEDULING:
+                continue
+            roster = self.store.fixture_referees(fixture["id"])
+            if referees.next_open_role([r["role"] for r in roster]) is not None:
+                pending.append((fixture, roster))
+        return pending
 
-        A referee who cannot be DM'd is recorded as declined rather than left
-        pending - otherwise the fixture would sit waiting on an offer that was
-        never delivered, and the sweep above would never retry it.
+    # ----------------------------------------------------------- referee board
+    def _claim_view(self, week, pending=None):
+        if pending is None:
+            pending = self.fixtures_needing_referee(week=week)
+        options, disabled = claim_options(pending, self.slot, week)
+        view = discord.ui.View(timeout=None)
+        view.add_item(ClaimSelect(week, options, disabled))
+        return view
+
+    def ref_board_payload(self, week):
+        """The board text(s), the claim-prompt text, its view, and a digest
+        of all of it together - so publish and refresh always agree on
+        whether anything actually changed."""
+        fixtures = self.store.fixtures(week=week)
+        rosters = {f["id"]: self.store.fixture_referees(f["id"]) for f in fixtures}
+        gw = next((g for g in season.ALL if g.week == week), None)
+        mention = "<@&{}>".format(config.REFEREE_ROLE_ID) if config.REFEREE_ROLE_ID else None
+        bodies = notify.referee_board(
+            fixtures, week, self.slot, rosters=rosters, gameweek=gw,
+            competition=self.timings.competition.competition, mention=mention,
+        )
+        pending = self.fixtures_needing_referee(week=week)
+        prompt = notify.referee_claim_prompt(len(pending))
+        view = self._claim_view(week, pending)
+        digest = notify.board_digest(bodies + [prompt])
+        return bodies, prompt, view, digest
+
+    async def publish_ref_board(self, week, channel):
+        """Post the referee board, and the claim menu under it."""
+        bodies, prompt, view, digest = self.ref_board_payload(week)
+        # Only this first post is allowed to ping the referee role - later
+        # edits stay quiet, same rule as the fixture board.
+        pinging = discord.AllowedMentions(everyone=False, roles=True, users=False)
+        quiet = discord.AllowedMentions.none()
+        sent = []
+        for index, body in enumerate(bodies):
+            sent.append(await channel.send(
+                body, allowed_mentions=pinging if index == 0 else quiet
+            ))
+        sent.append(await channel.send(prompt, view=view, allowed_mentions=quiet))
+        self.store.set_ref_board(week, channel.id, [m.id for m in sent], digest)
+        return sent[0]
+
+    async def refresh_ref_board(self, week):
+        """Edit the published referee board and its claim menu in place.
+
+        Same shape as refresh_board, plus one more message: the claim prompt,
+        which is re-edited every time because its options change with the
+        roster, not just its text.
         """
-        for _ in range(attempts):
-            candidate = referees.offer(self.store, fixture, slot.key)
-            if candidate is None:
-                log.warning("fixture %s needs a referee by hand", fixture["id"])
-                return None
-            channel = await self.referee_channel(fixture["week"])
-            sent = await self.post(
-                channel,
-                notify.referee_offer(fixture, slot, referee_id=candidate.referee_id),
-                view=offer_view(fixture["id"]),
-            )
-            if sent:
-                return candidate
-            # Nowhere to post: record it as declined so the fixture is retried
-            # rather than left waiting on an offer that was never delivered.
-            self.store.resolve_offer(fixture["id"], candidate.referee_id, OFFER_DECLINED)
-            self.store.note(fixture["id"], "could not post referee offer",
-                            str(candidate.referee_id))
-        return None
+        record = self.store.ref_board(week)
+        if not record:
+            return False
+        bodies, prompt, view, digest = self.ref_board_payload(week)
+        if digest == record.get("digest"):
+            return False
+        known = self.store.ref_board_message_ids(week)
+        known_board, known_prompt = known[:-1], (known[-1] if known else None)
+        try:
+            channel = self.get_channel(record["channel_id"]) or \
+                await self.fetch_channel(record["channel_id"])
+            quiet = discord.AllowedMentions.none()
+            live = []
+            for index, body in enumerate(bodies):
+                if index < len(known_board):
+                    message = await channel.fetch_message(known_board[index])
+                    if message.content != body:
+                        await message.edit(content=body, allowed_mentions=quiet)
+                    live.append(message.id)
+                else:
+                    live.append((await channel.send(body, allowed_mentions=quiet)).id)
+
+            for stale in known_board[len(bodies):]:
+                try:
+                    await (await channel.fetch_message(stale)).delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+
+            if known_prompt:
+                prompt_message = await channel.fetch_message(known_prompt)
+                await prompt_message.edit(content=prompt, view=view)
+                live.append(prompt_message.id)
+            else:
+                live.append((await channel.send(prompt, view=view, allowed_mentions=quiet)).id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
+            log.warning("referee board for %s unreachable (%s); forgetting it", week, error)
+            self.store.forget_ref_board(week)
+            return False
+
+        self.store.set_ref_board(week, record["channel_id"], live, digest)
+        return True
 
     # -------------------------------------------------------------- gameweeks
     def open_gameweeks(self, now=None):
@@ -341,9 +415,11 @@ class PRSBot(discord.Client):
     # ---------------------------------------------------------- fixture board
     def board_bodies(self, week):
         names = {r["discord_id"]: r["name"] for r in self.store.referees(active_only=False)}
+        fixtures = self.store.fixtures(week=week)
+        rosters = {f["id"]: self.store.fixture_referees(f["id"]) for f in fixtures}
         gw = next((g for g in season.ALL if g.week == week), None)
         return notify.fixture_board(
-            self.store.fixtures(week=week), week, self.slot, referee_names=names,
+            fixtures, week, self.slot, referee_names=names, rosters=rosters,
             gameweek=gw, deadline=gw.deadline if gw else None,
             mention=config.ANNOUNCE_MENTION or None,
             competition=self.timings.competition.competition,
@@ -432,21 +508,21 @@ class PRSBot(discord.Client):
     def dashboard_context(self, week):
         """The extra detail step 16 needs: who and why, not just how many."""
         fixtures = self.store.fixtures(week=week)
-        waiting_on, reasons, asked = {}, {}, {}
+        waiting_on, reasons, rosters = {}, {}, {}
         for fixture in fixtures:
             fixture_id = fixture["id"]
             waiting_on[fixture_id] = self.store.unsubmitted_managers(fixture_id)
-            asked[fixture_id] = self.store.refs_already_asked(fixture_id)
+            rosters[fixture_id] = self.store.fixture_referees(fixture_id)
             for entry in reversed(self.store.history(fixture_id)):
                 if entry["event"].startswith("status -> NEEDS_MANUAL") and entry["detail"]:
                     reasons[fixture_id] = entry["detail"]
                     break
-        return waiting_on, reasons, asked
+        return waiting_on, reasons, rosters
 
     async def show_dashboard(self, interaction, week, followup=False):
         buckets = dashboard(self.store, week=week)
-        waiting_on, reasons, asked = self.dashboard_context(week)
-        body = notify.dashboard_summary(buckets, week, waiting_on, reasons, asked)
+        waiting_on, reasons, rosters = self.dashboard_context(week)
+        body = notify.dashboard_summary(buckets, week, waiting_on, reasons, rosters)
         sender = interaction.followup.send if followup else \
             interaction.response.send_message
         await sender(body, ephemeral=True)
@@ -491,7 +567,7 @@ def staff_refusal(interaction):
     if interaction.guild is None:
         return ("Staff commands only work in the server, not in DMs. Discord "
                 "gives me no roles or permissions to check here.\n"
-                "-# `/availability` and `/refs availability` do work in DMs.")
+                "-# `/availability` and `/ref dropout` do work in DMs.")
     if config.STAFF_ROLE_ID:
         return ("That's a staff command. It needs the configured staff role "
                 "(`DISCORD_STAFF_ROLE_ID`).")
@@ -518,8 +594,17 @@ def register(bot):
     tree = bot.tree
     store = bot.store
 
-    fixture_group = app_commands.Group(name="fixture", description="Fixture scheduling")
-    refs_group = app_commands.Group(name="refs", description="Referees")
+    # Split by who uses them: /ref is what a referee runs on themselves,
+    # /refs is staff administering referees as a group - easy to tell apart
+    # in the picker, and the descriptions say so too.
+    fixture_group = app_commands.Group(name="fixture", description="Staff: fixture scheduling")
+    refs_group = app_commands.Group(name="refs", description="Staff: manage referees")
+    ref_group = app_commands.Group(name="ref", description="For referees: your own assignments")
+    # Everything here fakes real activity so a handful of people can exercise
+    # the whole flow without forty real managers and several real referees.
+    # Kept in its own group rather than scattered flags, so it's never a
+    # question of whether a command is "the real one" or "the test one".
+    test_group = app_commands.Group(name="test", description="Staff: fake activity for testing")
 
     # ------------------------------------------------------------- managers
     @tree.command(description="Set your availability for a fixture")
@@ -630,7 +715,8 @@ def register(bot):
             return
         await interaction.response.send_message(
             notify.fixture_detail(record, store.history(fixture),
-                                  bot.slot(record["slot_key"])),
+                                  bot.slot(record["slot_key"]),
+                                  store.fixture_referees(fixture)),
             ephemeral=True,
         )
 
@@ -671,21 +757,20 @@ def register(bot):
         )
 
     # ------------------------------------------------------------ referees
-    @refs_group.command(name="add", description="Register a referee")
+    @refs_group.command(name="register", description="Register a referee, or deactivate one")
+    @app_commands.describe(active="False deactivates them instead of registering")
     @staff_only()
-    async def refs_add(interaction, user: discord.User):
-        store.add_referee(user.id, user.display_name)
-        await interaction.response.send_message(
-            "{} added as a referee.".format(user.mention), ephemeral=True
-        )
-
-    @refs_group.command(name="remove", description="Deactivate a referee")
-    @staff_only()
-    async def refs_remove(interaction, user: discord.User):
-        store.set_referee_active(user.id, False)
-        await interaction.response.send_message(
-            "{} deactivated.".format(user.mention), ephemeral=True
-        )
+    async def refs_register(interaction, user: discord.User, active: bool = True):
+        if active:
+            store.add_referee(user.id, user.display_name)
+            await interaction.response.send_message(
+                "{} registered as a referee.".format(user.mention), ephemeral=True
+            )
+        else:
+            store.set_referee_active(user.id, False)
+            await interaction.response.send_message(
+                "{} deactivated.".format(user.mention), ephemeral=True
+            )
 
     @refs_group.command(name="list", description="Registered referees and their load")
     @staff_only()
@@ -695,21 +780,24 @@ def register(bot):
         rows = store.referees()
         if not rows:
             await interaction.response.send_message(
-                "No referees registered. Add one with `/refs add`.", ephemeral=True
+                "No referees registered. Add one with `/refs register`.", ephemeral=True
             )
             return
         lines = ["**Referees: week of {}**".format(week), ""]
         for ref in rows:
-            got = store.ref_availability(ref["discord_id"], week)
-            lines.append("· <@{}>: {} game(s){}".format(
-                ref["discord_id"], workload.get(ref["discord_id"], 0),
-                "" if (got and got["submitted"]) else "  ⚠️ no availability submitted",
-            ))
+            lines.append("· <@{}>: {} game(s)".format(
+                ref["discord_id"], workload.get(ref["discord_id"], 0)))
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @refs_group.command(name="assign", description="Assign a referee by hand")
+    @app_commands.describe(role="Which role to fill (default: next open one)")
+    @app_commands.choices(role=[
+        app_commands.Choice(name="Referee", value=referees.ROLE_REF),
+        app_commands.Choice(name="Assistant", value=referees.ROLE_AR),
+    ])
     @staff_only()
-    async def refs_assign(interaction, fixture: int, user: discord.User):
+    async def refs_assign(interaction, fixture: int, user: discord.User,
+                          role: app_commands.Choice[str] = None):
         record = store.fixture(fixture)
         if not record:
             await interaction.response.send_message(
@@ -721,44 +809,143 @@ def register(bot):
                 "#{} has no kickoff time yet.".format(fixture), ephemeral=True
             )
             return
-        store.add_referee(user.id, user.display_name)
-        store.withdraw_offers(fixture)
-        store.set_referee(fixture, user.id)
-        store.set_status(fixture, Status.FULLY_CONFIRMED,
-                         "referee set by hand by {}".format(interaction.user.id))
-        record = store.fixture(fixture)
-        slot = bot.slot(record["slot_key"])
-        channel = await bot.referee_channel(record["week"])
-        await bot.post(channel, notify.referee_confirmed(record, slot,
-                                                         referee_id=user.id))
-        await bot.refresh_board(record["week"])
-        await interaction.response.send_message(
-            "{} assigned to #{}. The fixture post has been updated.".format(
-                user.mention, fixture),
-            ephemeral=True,
-        )
-
-    @refs_group.command(name="availability", description="Set your referee availability")
-    async def refs_availability(interaction, week: str = None):
-        if not any(r["discord_id"] == interaction.user.id for r in store.referees()):
+        roster = store.fixture_referees(fixture)
+        if any(r["referee_id"] == user.id for r in roster):
             await interaction.response.send_message(
-                "You're not registered as a referee. Ask staff to add you.",
+                "{} is already on #{}.".format(user.mention, fixture), ephemeral=True
+            )
+            return
+        chosen_role = role.value if role else referees.next_open_role(
+            [r["role"] for r in roster])
+        if chosen_role is None:
+            await interaction.response.send_message(
+                "#{} already has a full team of officials.".format(fixture),
                 ephemeral=True,
             )
             return
-        week = week or bot.current_week()
-        await open_selector(interaction, store, Target(SCOPE_REF_WEEK, week), bot.slots)
 
-    @fixture_group.command(name="publish",
-                           description="Post the week's fixture list in this channel")
-    @app_commands.describe(week="Saturday of the weekend, YYYY-MM-DD. Defaults to the next one.")
+        store.add_referee(user.id, user.display_name)
+        store.claim_referee(fixture, user.id, chosen_role)
+        if chosen_role == referees.ROLE_REF:
+            store.set_status(fixture, Status.FULLY_CONFIRMED,
+                             "referee set by hand by {}".format(interaction.user.id))
+        record = store.fixture(fixture)
+        await bot.refresh_ref_board(record["week"])
+        await bot.refresh_board(record["week"])
+        await interaction.response.send_message(
+            "{} assigned as {} on #{}. The referee board has been updated.".format(
+                user.mention, referees.ROLE_LABEL[chosen_role], fixture),
+            ephemeral=True,
+        )
+
+    @refs_group.command(name="board",
+                        description="Publish the referee claim board here, or stop updating it")
+    @app_commands.describe(
+        week="Saturday of the weekend, YYYY-MM-DD. Defaults to the next one.",
+        stop="Stop updating the board instead of (re)publishing it",
+    )
     @staff_only()
-    async def fixture_publish(interaction, week: str = None):
+    async def refs_board(interaction, week: str = None, stop: bool = False):
         week = week or bot.current_week()
+
+        if stop:
+            if not store.ref_board(week):
+                await interaction.response.send_message(
+                    "No referee board published for the week of {}.".format(week),
+                    ephemeral=True,
+                )
+                return
+            store.forget_ref_board(week)
+            await interaction.response.send_message(
+                "Stopped updating the referee board for {}. The message is still "
+                "there; delete it by hand if you want it gone.".format(week),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        existing = store.ref_board(week)
+        try:
+            await bot.publish_ref_board(week, interaction.channel)
+        except (discord.Forbidden, discord.HTTPException) as error:
+            await interaction.followup.send(
+                "Couldn't post here: {}".format(error), ephemeral=True
+            )
+            return
+        note = ""
+        if existing:
+            note = ("\n-# The previous referee board for this week is no longer "
+                    "updated - delete it if you don't want it lying around.")
+        await interaction.followup.send(
+            "Published the referee board for the week of {} here. It'll "
+            "update itself as games get times and claims come in.{}".format(
+                week, note),
+            ephemeral=True,
+        )
+
+    # --------------------------------------------------------------- ref (self-service)
+    @ref_group.command(name="dropout", description="Drop out of a fixture you're officiating")
+    @app_commands.describe(user="Staff only: drop someone else instead of yourself")
+    async def ref_dropout(interaction, fixture: int, user: discord.User = None):
+        target = user or interaction.user
+        if user is not None and user.id != interaction.user.id and not is_staff(interaction):
+            await interaction.response.send_message(
+                "You can only drop yourself. Staff can remove someone else with "
+                "the `user` option.",
+                ephemeral=True,
+            )
+            return
+
+        record = store.fixture(fixture)
+        if not record:
+            await interaction.response.send_message(
+                "No fixture #{}.".format(fixture), ephemeral=True
+            )
+            return
+        try:
+            role = referees.drop(store, fixture, target.id)
+        except referees.ClaimError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+
+        who = "You're" if target.id == interaction.user.id else "{} is".format(target.mention)
+        await interaction.response.send_message(
+            "{} off #{} ({}). Someone else can claim it now.".format(
+                who, fixture, referees.ROLE_LABEL[role]),
+            ephemeral=True,
+        )
+        record = store.fixture(fixture)
+        await bot.refresh_ref_board(record["week"])
+        await bot.refresh_board(record["week"])
+
+    @fixture_group.command(name="board",
+                           description="Publish the week's fixture board here, or stop updating it")
+    @app_commands.describe(
+        week="Saturday of the weekend, YYYY-MM-DD. Defaults to the next one.",
+        stop="Stop updating the board instead of (re)publishing it",
+    )
+    @staff_only()
+    async def fixture_board_cmd(interaction, week: str = None, stop: bool = False):
+        week = week or bot.current_week()
+
+        if stop:
+            if not store.board(week):
+                await interaction.response.send_message(
+                    "No board published for the week of {}.".format(week), ephemeral=True
+                )
+                return
+            store.forget_board(week)
+            await interaction.response.send_message(
+                "Stopped updating the board for {}. The message is still there; "
+                "delete it by hand if you want it gone.".format(week),
+                ephemeral=True,
+            )
+            return
+
         await interaction.response.defer(ephemeral=True)
         existing = store.board(week)
         try:
-            message = await bot.publish_board(week, interaction.channel)
+            await bot.publish_board(week, interaction.channel)
         except (discord.Forbidden, discord.HTTPException) as error:
             await interaction.followup.send(
                 "Couldn't post here: {}".format(error), ephemeral=True
@@ -771,22 +958,6 @@ def register(bot):
         await interaction.followup.send(
             "Published the week of {} here. It'll update itself as fixtures "
             "change.{}".format(week, note),
-            ephemeral=True,
-        )
-
-    @fixture_group.command(name="unpublish", description="Stop updating this week's board")
-    @staff_only()
-    async def fixture_unpublish(interaction, week: str = None):
-        week = week or bot.current_week()
-        if not store.board(week):
-            await interaction.response.send_message(
-                "No board published for the week of {}.".format(week), ephemeral=True
-            )
-            return
-        store.forget_board(week)
-        await interaction.response.send_message(
-            "Stopped updating the board for {}. The message is still there; "
-            "delete it by hand if you want it gone.".format(week),
             ephemeral=True,
         )
 
@@ -823,9 +994,11 @@ def register(bot):
     @app_commands.describe(
         gameweek="e.g. GW2",
         count="Only create the first N fixtures. For testing; default is all 20.",
+        test="TESTING ONLY: instantly give every fixture a random kickoff time, "
+             "skipping availability entirely",
     )
     @staff_only()
-    async def gw_open(interaction, gameweek: str, count: int = None):
+    async def gw_open(interaction, gameweek: str, count: int = None, test: bool = False):
         await interaction.response.defer(ephemeral=True)
         try:
             gw = season.gameweek(gameweek)
@@ -863,24 +1036,39 @@ def register(bot):
             gw, manager_of, opened_by=interaction.user.id, limit=count
         )
 
+        scheduled = 0
+        if test:
+            # Not gated on `made`: fixtures from an earlier /gw open (or an
+            # earlier test:True run) are skipped as duplicates above, but if
+            # they're still sitting TBD this should fill them in too.
+            outcomes = run_once_randomly(store, bot.timings, week=gw.week)
+            scheduled = len(outcomes)
+            log.warning("TEST MODE: randomly scheduled %d fixture(s) for %s by %s",
+                       scheduled, gw.week, interaction.user)
+
         # The announcement is the primary channel, not the DMs. Plenty of
         # managers have DMs from server members switched off, and for them a DM
         # is simply never delivered - so the fixture list and the button that
         # opens the selector both go in the channel where everyone can see them.
+        # In test mode there's nothing left to submit, so the button is skipped.
         posted = None
         try:
-            posted = await bot.publish_board(gw.week, interaction.channel)
+            posted = await bot.publish_board(gw.week, interaction.channel, with_button=not test)
         except (discord.Forbidden, discord.HTTPException) as error:
             log.warning("could not post the announcement: %s", error)
 
         parts = ["Opened **{}**: {} fixture(s) created, deadline {}.".format(
             gw.key, len(made), gw.deadline.strftime("%a %d %b %H:%M UTC"))]
+        if test:
+            parts.append("-# TEST MODE: {} fixture(s) given a random kickoff time - "
+                         "availability was skipped entirely.".format(scheduled))
         if posted:
-            parts.append("Announcement posted here with the **Submit my "
-                         "timings** button; it updates itself as fixtures are agreed.")
+            parts.append("Announcement posted here" +
+                         ("." if test else " with the **Submit my timings** button.") +
+                         " It updates itself as fixtures are agreed.")
         else:
             parts.append("⚠️ Couldn't post the announcement in this channel. "
-                         "Check my permissions, then run `/fixture publish`.")
+                         "Check my permissions, then run `/fixture board`.")
         if count:
             parts.append("-# Limited to the first {} of {} fixtures. Run again "
                          "without `count` to create the rest.".format(
@@ -904,7 +1092,7 @@ def register(bot):
             ephemeral=True,
         )
 
-    managers_group = app_commands.Group(name="managers", description="Team managers")
+    managers_group = app_commands.Group(name="managers", description="Staff: team managers")
 
     @managers_group.command(name="set", description="Say who manages a team")
     @app_commands.describe(team="Team name as in the timings sheet")
@@ -936,25 +1124,99 @@ def register(bot):
                          "\n\nEvery team is covered. ✅")
         await interaction.response.send_message(body, ephemeral=True)
 
+    # -------------------------------------------------------------------- test
+    @test_group.command(name="managers",
+                        description="TEST ONLY: spread every team across testers, round-robin")
+    @app_commands.describe(
+        user1="Tester to assign teams to", user2="Second tester (optional)",
+        user3="Third tester (optional)",
+    )
+    @staff_only()
+    async def test_managers(interaction, user1: discord.User,
+                            user2: discord.User = None, user3: discord.User = None):
+        # Every team, not just unmanaged ones - a partial prior run (or a real
+        # /managers set someone forgot about) would otherwise leave the spread
+        # lopsided instead of even across all 40.
+        testers = [u for u in (user1, user2, user3) if u is not None]
+        assigned = []
+        for index, (code, name) in enumerate(sorted(season.TEAM_CODES.items())):
+            tester = testers[index % len(testers)]
+            store.set_manager(name, tester.id)
+            # Also rewrite fixtures that already exist for this team - without
+            # this, re-running the command after /gw open leaves the OLD
+            # manager id trapped on those fixtures, still blocking them from
+            # refereeing a game they no longer actually manage.
+            store.reassign_fixture_managers(name, tester.id)
+            assigned.append("{} → {}".format(code, tester.display_name))
+
+        shown = ", ".join(assigned[:15]) + (", ..." if len(assigned) > 15 else "")
+        await interaction.response.send_message(
+            "Set **{}** team(s), spread evenly across {}. This overwrites any "
+            "existing manager for every team, including on fixtures already "
+            "created - so a previous manager is fully freed up (e.g. to "
+            "referee) rather than left blocked on their old games.\n-# {}".format(
+                len(assigned), ", ".join(t.mention for t in testers), shown),
+            ephemeral=True,
+        )
+
+    @test_group.command(name="referees",
+                        description="TEST ONLY: register testers as refs and claim every open game")
+    @app_commands.describe(
+        user1="Tester to register and claim games as",
+        user2="Second tester (optional)", user3="Third tester (optional)",
+    )
+    @staff_only()
+    async def test_referees(interaction, user1: discord.User,
+                            user2: discord.User = None, user3: discord.User = None):
+        testers = [u for u in (user1, user2, user3) if u is not None]
+        for tester in testers:
+            store.add_referee(tester.id, tester.display_name)
+
+        claimed, skipped, weeks = 0, 0, set()
+        for fixture, _ in bot.fixtures_needing_referee():
+            for _ in range(len(testers) * 3):  # up to 3 roles, each tester gets a fair shot
+                roster = store.fixture_referees(fixture["id"])
+                if referees.next_open_role([r["role"] for r in roster]) is None:
+                    break
+                tester = testers[(claimed + skipped) % len(testers)]
+                try:
+                    referees.claim(store, fixture, tester.id)
+                    claimed += 1
+                    weeks.add(fixture["week"])
+                except referees.ClaimError:
+                    skipped += 1
+
+        for week in weeks:
+            await bot.refresh_ref_board(week)
+            await bot.refresh_board(week)
+        await interaction.response.send_message(
+            "Registered {} as referees and made **{}** claim(s) across open "
+            "games ({} skipped, usually a kickoff clash).".format(
+                ", ".join(t.mention for t in testers), claimed, skipped),
+            ephemeral=True,
+        )
+
+    @test_group.command(name="schedule",
+                        description="TEST ONLY: instantly give every unscheduled fixture a random time")
+    @app_commands.describe(
+        week="Saturday of the weekend, YYYY-MM-DD - required, so this can't "
+             "land on the live gameweek by accident",
+    )
+    @staff_only()
+    async def test_schedule(interaction, week: str):
+        await interaction.response.defer(ephemeral=True)
+        outcomes = run_once_randomly(store, bot.timings, week=week)
+        log.warning("TEST MODE: randomly scheduled %d fixture(s) for %s by %s",
+                   len(outcomes), week, interaction.user)
+        await bot.process(week=week)
+        await bot.show_dashboard(interaction, week, followup=True)
+
     tree.add_command(gw_group)
     tree.add_command(managers_group)
     tree.add_command(fixture_group)
     tree.add_command(refs_group)
-
-    @tree.command(description="Check the bot's configuration and data")
-    @staff_only()
-    async def status(interaction):
-        week = bot.current_week()
-        await interaction.response.send_message("\n".join([
-            "**{}**".format(bot.timings.title),
-            "Slots offered: {} across {}".format(
-                len(bot.slots), ", ".join(sorted({s.day for s in bot.slots}))
-            ),
-            "Teams in the sheet: {}".format(len(bot.timings.sheet.teams)),
-            "Fixtures this week: {}".format(len(store.fixtures(week=week))),
-            "Referees: {}".format(len(store.referees())),
-            "Runner: every {} min".format(TICK_MINUTES),
-        ]), ephemeral=True)
+    tree.add_command(ref_group)
+    tree.add_command(test_group)
 
 
 # --------------------------------------------------------------------------

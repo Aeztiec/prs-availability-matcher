@@ -1,131 +1,99 @@
-"""Accept / decline buttons on a referee's assignment DM.
+"""The claim menu under the referee board.
 
-Same pattern as the availability selector: DynamicItems, so an offer sent
-before a restart is still answerable afterwards, and the referee's identity
-comes from the interaction rather than from the custom_id - so nobody can
-accept a game on someone else's behalf by replaying a button.
+One persistent Select, keyed by week rather than by fixture - so a single
+component can offer every open game at once instead of a message per fixture.
+Same DynamicItem pattern as everywhere else: it survives a restart, and the
+claimant's identity comes from the interaction rather than the component, so
+nobody can claim on someone else's behalf by replaying it.
 """
 
 from __future__ import annotations
 
 import discord
 
-from . import notify, referees
-from .db import OFFER_DECLINED, OFFER_OFFERED
+from . import referees
+from .weeks import slot_datetime
+
+MAX_OPTIONS = 25  # Discord's cap on a single select menu
 
 
-def _offered_to(store, fixture_id, user_id):
-    """Is this user the person currently being asked?"""
-    with store._connect() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM ref_offers WHERE fixture_id=? AND referee_id=? AND state=?",
-            (fixture_id, user_id, OFFER_OFFERED),
-        ).fetchone()
-    return row is not None
+def claim_options(pending, slot_for, week):
+    """Select options for the open fixtures, most urgent (no referee at all)
+    first, then soonest kickoff. Discord allows at most 25 options."""
+    ordered = sorted(pending, key=lambda item: (
+        0 if not any(r["role"] == referees.ROLE_REF for r in item[1]) else 1,
+        slot_datetime(week, slot_for(item[0]["slot_key"])),
+    ))
+
+    options = []
+    for fixture, roster in ordered[:MAX_OPTIONS]:
+        slot = slot_for(fixture["slot_key"])
+        role = referees.next_open_role([r["role"] for r in roster])
+        label = "#{} {} vs {} - {} ({} open)".format(
+            fixture["id"], fixture["home_team"], fixture["away_team"],
+            slot.label, referees.ROLE_LABEL[role].capitalize(),
+        )
+        options.append(discord.SelectOption(label=label[:100], value=str(fixture["id"])))
+
+    if not options:
+        return [discord.SelectOption(label="Nothing needs a referee right now",
+                                     value="none")], True
+    return options, False
 
 
-class _OfferButton:
-    """Shared checks. A plain mixin, not a DynamicItem subclass."""
+class ClaimSelect(
+    discord.ui.DynamicItem[discord.ui.Select],
+    template=r"refclaim:(?P<week>[\w-]+)",
+):
+    def __init__(self, week, options, disabled=False):
+        self.week = week
+        super().__init__(
+            discord.ui.Select(
+                custom_id="refclaim:{}".format(week),
+                placeholder="Claim a game...",
+                options=options,
+                disabled=disabled,
+            )
+        )
 
-    async def resolve(self, interaction):
-        """Common checks. Returns (store, fixture, slot) or None."""
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        week = match["week"]
+        client = interaction.client
+        pending = client.fixtures_needing_referee(week=week)
+        options, disabled = claim_options(pending, client.slot, week)
+        return cls(week, options, disabled)
+
+    async def callback(self, interaction):
+        chosen = self.item.values[0]
+        if chosen == "none":
+            await interaction.response.defer()
+            return
+
         store = interaction.client.store
-        fixture = store.fixture(self.fixture_id)
+        fixture = store.fixture(int(chosen))
         if not fixture:
             await interaction.response.send_message(
                 "That fixture no longer exists.", ephemeral=True
             )
-            return None
-        if not _offered_to(store, self.fixture_id, interaction.user.id):
-            # Either already answered, withdrawn, or never theirs to answer.
-            await interaction.response.send_message(
-                "This assignment is no longer open for you. It may already "
-                "have been answered or reassigned.",
-                ephemeral=True,
-            )
-            return None
-        slot = interaction.client.slot(fixture["slot_key"])
-        return store, fixture, slot
-
-
-class AcceptButton(
-    _OfferButton,
-    discord.ui.DynamicItem[discord.ui.Button],
-    template=r"ra:(?P<fixture>\d+)",
-):
-    def __init__(self, fixture_id):
-        self.fixture_id = int(fixture_id)
-        super().__init__(
-            discord.ui.Button(
-                label="Accept",
-                style=discord.ButtonStyle.success,
-                custom_id="ra:{}".format(fixture_id),
-            )
-        )
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(match["fixture"])
-
-    async def callback(self, interaction):
-        resolved = await self.resolve(interaction)
-        if not resolved:
             return
-        store, fixture, slot = resolved
-
-        fixture = referees.accept(store, self.fixture_id, interaction.user.id)
-        # The offer post becomes the confirmation, in place - so the channel
-        # keeps one message per fixture rather than a trail of them.
-        await interaction.response.edit_message(
-            content=notify.referee_confirmed(fixture, slot,
-                                             referee_id=interaction.user.id),
-            view=None,
-        )
-        # Nobody is messaged individually. The fixture announcement carries the
-        # referee's name, and refreshing it is how the managers find out.
-        await interaction.client.refresh_board(fixture["week"])
-
-
-class DeclineButton(
-    _OfferButton,
-    discord.ui.DynamicItem[discord.ui.Button],
-    template=r"rd:(?P<fixture>\d+)",
-):
-    def __init__(self, fixture_id):
-        self.fixture_id = int(fixture_id)
-        super().__init__(
-            discord.ui.Button(
-                label="Decline",
-                style=discord.ButtonStyle.secondary,
-                custom_id="rd:{}".format(fixture_id),
-            )
-        )
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match):
-        return cls(match["fixture"])
-
-    async def callback(self, interaction):
-        resolved = await self.resolve(interaction)
-        if not resolved:
+        try:
+            role = referees.claim(store, fixture, interaction.user.id)
+        except referees.ClaimError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
             return
-        store, fixture, slot = resolved
 
-        store.resolve_offer(self.fixture_id, interaction.user.id, OFFER_DECLINED)
-        await interaction.response.edit_message(
-            content="Understood. We will ask someone else for #{}.".format(self.fixture_id),
-            view=None,
+        await interaction.response.send_message(
+            "You're in as **{}** for **#{}** ({} vs {}). Drop out any time "
+            "with `/ref dropout`.".format(
+                referees.ROLE_LABEL[role], fixture["id"],
+                fixture["home_team"], fixture["away_team"]),
+            ephemeral=True,
         )
-        # Hand off to the client so the next offer goes out the same way the
-        # first one did, including the unreachable-referee handling.
-        await interaction.client.offer_referee(store.fixture(self.fixture_id), slot)
+        # The board and its menu are edited by id, not through this response -
+        # they're separate messages from whatever this select is attached to
+        # once the board has grown past one chunk.
+        await interaction.client.refresh_ref_board(self.week)
 
 
-def offer_view(fixture_id):
-    view = discord.ui.View(timeout=None)
-    view.add_item(AcceptButton(fixture_id))
-    view.add_item(DeclineButton(fixture_id))
-    return view
-
-
-REF_DYNAMIC_ITEMS = (AcceptButton, DeclineButton)
+REF_DYNAMIC_ITEMS = (ClaimSelect,)

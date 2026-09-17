@@ -11,7 +11,7 @@ import sys
 from bot.scheduling import (
     Candidate, Pref, Source, Status,
     candidates_from_preferences, choose, combined_score,
-    schedule_from_preferences, schedule_from_sheet,
+    schedule_from_preferences, schedule_from_sheet, schedule_randomly,
 )
 from bot.slots import Slot, clean_day, parse_clock, slot_key
 
@@ -176,6 +176,32 @@ fb_loaded = schedule_from_sheet(
     load={"sat_1700": 3, "sat_1800": 0, "sun_1400": 3},
 )
 check("emptiest slot wins", fb_loaded.slot.key, "sat_1800")
+
+# --------------------------------------------------------------------------
+print("\nrandom scheduling (testing only): ignores preferences entirely")
+# --------------------------------------------------------------------------
+random_picks = {schedule_randomly(slots, rng=random.Random(s)).slot.key
+                for s in range(40)}
+check("lands on more than one slot across enough tries", len(random_picks) > 1, True)
+check("never picks outside the given slots",
+      random_picks <= {s.key for s in slots}, True)
+
+tagged = schedule_randomly(slots, rng=random.Random(0))
+check("scheduled", tagged.scheduled, True)
+check("tagged with the TEST source", tagged.source, Source.TEST)
+check("status is SCHEDULED like any other path", tagged.status, Status.SCHEDULED)
+
+print("\nrandom scheduling still respects a hard conflict")
+constrained = schedule_randomly(
+    slots, busy={"sat_1700", "sat_1800", "sun_1400"}, rng=random.Random(0),
+)
+check("only the one free slot is ever chosen", constrained.slot.key, "sat_1900")
+
+print("\nno free slot left -> flagged, not silently skipped")
+none_left = schedule_randomly(slots, busy={s.key for s in slots})
+check("nothing scheduled", none_left.scheduled, False)
+check("flagged for staff", none_left.status, Status.NEEDS_MANUAL_SCHEDULING)
+check("reason says why", "no free slot" in none_left.reason, True)
 
 # --------------------------------------------------------------------------
 print("\nclock parsing")

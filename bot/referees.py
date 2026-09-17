@@ -1,163 +1,82 @@
-"""Choosing a referee for a scheduled fixture.
+"""Officiating a scheduled fixture: first come, first served.
 
-Same shape as scheduling.py: the ranking is pure and the store-backed helpers
-around it only gather inputs. Fairness is the thing worth testing - a system
-that keeps picking the same two willing referees will burn them out, and that
-failure is invisible until they stop volunteering.
-
-Order of elimination, from the spec's step 12:
-
-    active referees
-      -> who said they can do that slot
-      -> minus anyone already committed to that slot
-      -> minus anyone already asked about this fixture
-      -> ranked by workload, then by how keen they were
-      -> ties broken at random
+A fixture takes at most one REF (the referee) and two AR (assistant/VAR)
+claims. Whoever clicks first gets the open role - there is no availability to
+submit beforehand and no ranked offer to wait on. The only checks are the ones
+that would make a claim nonsensical: not a registered active referee, already
+on this fixture, the fixture's roles are already full, or already officiating
+another fixture at the same kickoff time.
 """
 
 from __future__ import annotations
 
-import random
-from dataclasses import dataclass
+from .scheduling import Status
 
-from .scheduling import Pref, Status
+ROLE_REF = "REF"
+ROLE_AR = "AR"
+MAX_ASSISTANTS = 2
 
-
-@dataclass
-class RefCandidate:
-    referee_id: int
-    name: str
-    workload: int      # games already assigned or offered this week
-    preference: Pref   # what they said about this slot
-
-    @property
-    def rank(self):
-        """Lower is better.
-
-        Workload comes before preference on purpose: spreading games matters
-        more than a referee's mild preference between two times they already
-        said they could do.
-        """
-        return (self.workload, -int(self.preference))
+ROLE_LABEL = {ROLE_REF: "referee", ROLE_AR: "assistant"}
 
 
-def eligible(referees, availability, slot_key, workloads, busy_in_slot=(),
-             already_asked=(), excluded=()):
-    """Referees who could take this fixture, best first.
+class ClaimError(Exception):
+    """Why a claim or drop-out was refused, phrased so it can be shown as-is."""
 
-    `availability` is {referee_id: {slot_key: pref}}. A referee with no
-    submission for the week is not a candidate - silence is not consent, the
-    same rule the manager and sheet paths use.
+
+def next_open_role(roles):
+    """The role a new claim would take, or None if the fixture is fully staffed.
+
+    `roles` is the list of role strings already claimed. The referee slot
+    fills first; only once it is taken do assistant slots become claimable -
+    a game with no referee at all is the one that actually can't be played.
     """
-    busy_in_slot = set(busy_in_slot)
-    already_asked = set(already_asked)
-    excluded = set(excluded)
-
-    found = []
-    for referee in referees:
-        referee_id = referee["discord_id"]
-        if referee_id in busy_in_slot or referee_id in already_asked:
-            continue
-        if referee_id in excluded:
-            continue
-        said = (availability.get(referee_id) or {}).get(slot_key, Pref.NO)
-        if Pref(int(said)) == Pref.NO:
-            continue
-        found.append(RefCandidate(
-            referee_id=referee_id,
-            name=referee["name"],
-            workload=workloads.get(referee_id, 0),
-            preference=Pref(int(said)),
-        ))
-    found.sort(key=lambda c: c.rank)
-    return found
+    if ROLE_REF not in roles:
+        return ROLE_REF
+    if roles.count(ROLE_AR) < MAX_ASSISTANTS:
+        return ROLE_AR
+    return None
 
 
-def choose(candidates, rng=None):
-    """Pick from ranked candidates, breaking a real tie at random.
+def claim(store, fixture, referee_id):
+    """Give the next open role on `fixture` to `referee_id`, or raise ClaimError."""
+    if not store.is_active_referee(referee_id):
+        raise ClaimError(
+            "You're not registered as an active referee. Ask an Official to "
+            "add you with `/refs register`."
+        )
+    if not fixture["slot_key"]:
+        raise ClaimError("This fixture doesn't have a kickoff time yet.")
+    if referee_id in (fixture["home_manager_id"], fixture["away_manager_id"]):
+        raise ClaimError("You can't referee a fixture you manage.")
 
-    Without the random step the same referee is picked every week - they sort
-    first, so they get every game until their workload rises above everyone
-    else's, then the next one does.
-    """
-    if not candidates:
-        return None
-    rng = rng or random
-    best = candidates[0].rank
-    tied = [c for c in candidates if c.rank == best]
-    return rng.choice(tied) if len(tied) > 1 else tied[0]
+    rows = store.fixture_referees(fixture["id"])
+    if any(r["referee_id"] == referee_id for r in rows):
+        raise ClaimError("You're already on this fixture.")
 
+    role = next_open_role([r["role"] for r in rows])
+    if role is None:
+        raise ClaimError("This fixture already has a full team of officials.")
 
-# --------------------------------------------------------------------------
-# store-backed helpers
-# --------------------------------------------------------------------------
+    if store.ref_committed_in_slot(fixture["week"], fixture["slot_key"], referee_id,
+                                   exclude_fixture=fixture["id"]):
+        raise ClaimError("You're already officiating another game at that kickoff time.")
 
-def gather(store, fixture, slot_key):
-    """Everything eligible() needs, read from the database."""
-    week = fixture["week"]
-    competition = fixture["competition"]
-
-    referees = store.referees()
-    availability = {}
-    for referee in referees:
-        record = store.ref_availability(referee["discord_id"], week)
-        if record and record["submitted"]:
-            availability[referee["discord_id"]] = record["slots"]
-
-    assigned = store.ref_workload(week, competition)
-    pending = store.ref_pending_count(week, competition)
-    workloads = {
-        referee["discord_id"]: assigned.get(referee["discord_id"], 0)
-                               + pending.get(referee["discord_id"], 0)
-        for referee in referees
-    }
-
-    return {
-        "referees": referees,
-        "availability": availability,
-        "workloads": workloads,
-        "busy_in_slot": store.ref_slot_assignments(week, competition).get(slot_key, set()),
-        "already_asked": store.refs_already_asked(fixture["id"]),
-        # A referee should not officiate a fixture they are managing.
-        "excluded": {fixture["home_manager_id"], fixture["away_manager_id"]},
-    }
+    store.claim_referee(fixture["id"], referee_id, role)
+    if role == ROLE_REF:
+        store.set_status(fixture["id"], Status.FULLY_CONFIRMED)
+    return role
 
 
-def next_referee(store, fixture, slot_key, rng=None):
-    """The referee to offer this fixture to, or None if nobody is left."""
-    inputs = gather(store, fixture, slot_key)
-    return choose(eligible(slot_key=slot_key, **inputs), rng=rng)
+def drop(store, fixture_id, referee_id):
+    """Take `referee_id` off a fixture they claimed, or raise ClaimError."""
+    rows = store.fixture_referees(fixture_id)
+    mine = next((r for r in rows if r["referee_id"] == referee_id), None)
+    if not mine:
+        raise ClaimError("You're not on this fixture.")
 
-
-def offer(store, fixture, slot_key, rng=None):
-    """Record an offer to the best remaining referee.
-
-    Returns the candidate, or None having flagged the fixture for staff.
-    """
-    candidate = next_referee(store, fixture, slot_key, rng=rng)
-    if candidate is None:
-        store.set_status(fixture["id"], Status.NEEDS_MANUAL_REF,
-                         "no available referee left to ask")
-        return None
-    store.offer(fixture["id"], candidate.referee_id)
-    return candidate
-
-
-def accept(store, fixture_id, referee_id):
-    """A referee said yes. Any other outstanding offer is withdrawn."""
-    store.resolve_offer(fixture_id, referee_id, "ACCEPTED")
-    store.withdraw_offers(fixture_id)
-    store.set_referee(fixture_id, referee_id)
-    store.set_status(fixture_id, Status.FULLY_CONFIRMED)
-    return store.fixture(fixture_id)
-
-
-def decline(store, fixture_id, referee_id, slot_key, rng=None):
-    """A referee said no. Ask the next one.
-
-    Returns the next candidate, or None if the fixture now needs a human.
-    `refs_already_asked` includes the decliner, so nobody is asked twice.
-    """
-    store.resolve_offer(fixture_id, referee_id, "DECLINED")
-    fixture = store.fixture(fixture_id)
-    return offer(store, fixture, slot_key, rng=rng)
+    store.drop_referee(fixture_id, referee_id)
+    if mine["role"] == ROLE_REF:
+        fixture = store.fixture(fixture_id)
+        if fixture and fixture["status"] == Status.FULLY_CONFIRMED:
+            store.set_status(fixture_id, Status.SCHEDULED, "referee dropped out")
+    return mine["role"]

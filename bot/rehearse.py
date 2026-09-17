@@ -92,30 +92,23 @@ REFS = {}
 for n, name in enumerate(["Ref Alice", "Ref Bo", "Ref Cass"], start=1):
     REFS[9000 + n] = name
     store.add_referee(9000 + n, name)
-    # Registering a referee is not enough - they have to submit availability,
-    # or they are not a candidate for anything. Worth seeing: the first run of
-    # this rehearsal left it out and every fixture came back NEEDS_MANUAL_REF.
-    store.save_ref_availability(
-        9000 + n, gw.week,
-        {slot.key: int(Pref.IDEAL) for slot in timings.slots}, submitted=True,
-    )
 
-# One extra referee who registered but never filled the selector in, to show
-# that they are correctly never offered a game.
+# A deactivated referee, to show they are correctly refused a claim.
 store.add_referee(9099, "Ref Dormant")
+store.set_referee_active(9099, False)
 
 
 rule("SETUP  ·  what staff does once")
 say("")
 say("    Competition   : {}".format(timings.title))
-say("    Gameweek      : {} — plays {}".format(gw.key, gw.friday.strftime("%a %d %b")))
+say("    Gameweek      : {} (plays {})".format(gw.key, gw.friday.strftime("%a %d %b")))
 say("    Deadline      : {} (Wednesday's close)".format(
     gw.deadline.strftime("%a %d %b %H:%M UTC")))
 say("    Slots offered : {} across {}".format(
     len(timings.slots), ", ".join(sorted({s.day for s in timings.slots}))))
 say("    Referees      : {}".format(", ".join(REFS.values())))
 say("")
-say("    Staff would run:  /managers set  (x40)   then  /refs add  (x3)")
+say("    Staff would run:  /managers set  (x40)   then  /refs register  (x3)")
 say("                      then  /gw open GW1")
 
 
@@ -145,26 +138,51 @@ def slot_of(key):
     return next((s for s in timings.slots if s.key == key), None)
 
 
-def offer_referee(fixture_id, decline_first=True):
-    """Ref allocation, with the first ref declining to exercise that path."""
+def open_referee_count():
+    """Fixtures still missing a role of any kind - main ref or an assistant."""
+    open_count = 0
+    for f in store.fixtures(week=gw.week):
+        if not f["slot_key"]:
+            continue
+        roles = [r["role"] for r in store.fixture_referees(f["id"])]
+        if referees.next_open_role(roles) is not None:
+            open_count += 1
+    return open_count
+
+
+def unreffed_count():
+    """Fixtures with no main referee at all - the one that actually blocks play."""
+    return sum(
+        1 for f in store.fixtures(week=gw.week)
+        if f["slot_key"] and not any(
+            r["role"] == referees.ROLE_REF for r in store.fixture_referees(f["id"])
+        )
+    )
+
+
+def show_ref_board():
+    rosters = {f["id"]: store.fixture_referees(f["id"]) for f in store.fixtures(week=gw.week)}
+    say("")
+    say("    ┌─ Posted in #referees " + "─" * 40)
+    bodies = notify.referee_board(store.fixtures(week=gw.week), gw.week, slot_of,
+                                  rosters=rosters, gameweek=gw)
+    for body in bodies:
+        for line in body.splitlines():
+            say("    │ " + line)
+    say("    │ ")
+    for line in notify.referee_claim_prompt(open_referee_count()).splitlines():
+        say("    │ " + line)
+    say("    └" + "─" * 60)
+
+
+def claim_referee(fixture_id, referee_id, and_assistant=None):
+    """A referee claims the open game; the roster claims come first-come-first-served."""
     fixture = store.fixture(fixture_id)
-    slot = slot_of(fixture["slot_key"])
-    first = referees.offer(store, fixture, slot.key, rng=RNG)
-    if first is None:
-        say("    (no referee available — fixture flagged NEEDS_MANUAL_REF)")
-        return None
-    show_dm(REFS[first.referee_id], notify.referee_offer(fixture, slot))
-    if decline_first:
-        say("    {} clicks Decline.".format(REFS[first.referee_id]))
-        nxt = referees.decline(store, fixture_id, first.referee_id, slot.key, rng=RNG)
-        if nxt is None:
-            say("    (nobody left — flagged for staff)")
-            return None
-        say("    Next up: {}".format(REFS[nxt.referee_id]))
-        first = nxt
-    say("    {} clicks Accept.".format(REFS[first.referee_id]))
-    referees.accept(store, fixture_id, first.referee_id)
-    return first
+    role = referees.claim(store, fixture, referee_id)
+    say("    {} clicks 'I'll ref this' -> {}.".format(REFS[referee_id], role))
+    if and_assistant:
+        referees.claim(store, store.fixture(fixture_id), and_assistant)
+        say("    {} clicks 'I'll ref this' -> AR.".format(REFS[and_assistant]))
 
 
 # ---- 1. both managers reply ----------------------------------------------
@@ -194,11 +212,12 @@ expect("took the slot both called ideal", outcome.decision.slot.key, "sat_1800")
 
 fixture = store.fixture(fid1)
 show_dm("both managers", notify.fixture_confirmed(fixture, slot_of(fixture["slot_key"])))
-chosen_ref = offer_referee(fid1)
-expect("fully confirmed", store.fixture(fid1)["status"], Status.FULLY_CONFIRMED)
-if chosen_ref:
-    show_dm(REFS[chosen_ref.referee_id],
-            notify.referee_confirmed(store.fixture(fid1), slot_of(fixture["slot_key"])))
+say("")
+say("    The call for a referee goes up in #referees. First come, first served -")
+say("    up to one referee and two assistants/VARs per game.")
+claim_referee(fid1, 9001, and_assistant=9002)
+expect("fully confirmed once the referee slot is claimed",
+      store.fixture(fid1)["status"], Status.FULLY_CONFIRMED)
 
 
 # ---- 2. only one replies -------------------------------------------------
@@ -230,7 +249,13 @@ expect("did NOT just take the one reply's pick",
 
 fixture = store.fixture(fid2)
 show_dm("both managers", notify.fixture_confirmed(fixture, slot_of(fixture["slot_key"])))
-offer_referee(fid2, decline_first=False)
+say("")
+claim_referee(fid2, 9002)
+say("    {} has to pull out, and uses /ref dropout.".format(REFS[9002]))
+referees.drop(store, fid2, 9002)
+expect("back to needing a referee", store.fixture(fid2)["status"], Status.SCHEDULED)
+say("    {} claims it instead.".format(REFS[9003]))
+claim_referee(fid2, 9003)
 
 
 # ---- 3. nobody replies and the sheet can't help --------------------------
@@ -256,13 +281,24 @@ store.set_schedule(fid3, "sat_2000", "MANUAL", Status.SCHEDULED)
 store.note(fid3, "set by hand", "sat_2000 by a staff member")
 fixture = store.fixture(fid3)
 show_dm("both managers", notify.fixture_confirmed(fixture, slot_of("sat_2000")))
-offer_referee(fid3, decline_first=False)
+claim_referee(fid3, 9001)
 
 
 # --------------------------------------------------------------------------
-rule("THE FIXTURE BOARD  ·  /fixture publish")
+rule("THE REFEREE BOARD  ·  /refs board")
+show_ref_board()
+expect("every fixture has a referee, even if not every assistant slot is filled",
+      unreffed_count(), 0)
+expect("but every fixture still has at least one assistant slot open",
+      open_referee_count(), 3)
+
+
+# --------------------------------------------------------------------------
+rule("THE FIXTURE BOARD  ·  /fixture board")
 names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
-for body in notify.fixture_board(store.fixtures(week=gw.week), gw.week, slot_of, names):
+rosters = {f["id"]: store.fixture_referees(f["id"]) for f in store.fixtures(week=gw.week)}
+for body in notify.fixture_board(store.fixtures(week=gw.week), gw.week, slot_of,
+                                 referee_names=names, rosters=rosters):
     say("")
     for line in body.splitlines():
         say("    " + line)
@@ -271,8 +307,6 @@ rule("THE STAFF DASHBOARD  ·  /fixture list")
 buckets = dashboard(store, week=gw.week)
 waiting_on = {f["id"]: store.unsubmitted_managers(f["id"])
               for f in store.fixtures(week=gw.week)}
-asked = {f["id"]: store.refs_already_asked(f["id"])
-         for f in store.fixtures(week=gw.week)}
 reasons = {}
 for f in store.fixtures(week=gw.week):
     for entry in reversed(store.history(f["id"])):
@@ -281,13 +315,14 @@ for f in store.fixtures(week=gw.week):
             break
 say("")
 for line in notify.dashboard_summary(buckets, gw.week, waiting_on, reasons,
-                                     asked).splitlines():
+                                     rosters).splitlines():
     say("    " + line)
 
 rule("THE AUDIT TRAIL  ·  /fixture show 2")
 say("")
 for line in notify.fixture_detail(store.fixture(fid2), store.history(fid2),
-                                  slot_of(store.fixture(fid2)["slot_key"])).splitlines():
+                                  slot_of(store.fixture(fid2)["slot_key"]),
+                                  store.fixture_referees(fid2)).splitlines():
     say("    " + line)
 
 
@@ -303,4 +338,4 @@ print("")
 if PROBLEMS:
     print("REHEARSAL FAILED: {}".format(", ".join(PROBLEMS)))
     sys.exit(1)
-print("Rehearsal passed — the full workflow behaved correctly end to end.")
+print("Rehearsal passed: the full workflow behaved correctly end to end.")

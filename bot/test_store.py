@@ -9,7 +9,7 @@ import os
 import sys
 import tempfile
 
-from bot.db import OFFER_ACCEPTED, OFFER_DECLINED, Store
+from bot.db import Store
 from bot.scheduling import Pref, Source, Status, schedule_from_preferences
 from bot.selector import SelectorState, describe_choice, fits_on_one_message, rows_needed
 from bot.slots import Slot, clean_day, slot_key
@@ -144,21 +144,29 @@ store.set_referee_active(903, False)
 check("deactivated ref hidden", [r["discord_id"] for r in store.referees()], [901, 902])
 check("still listed when asked for all", len(store.referees(active_only=False)), 3)
 
-store.save_ref_availability(901, WEEK, {"sat_1800": 2}, submitted=True)
-check("ref availability round-trips", store.ref_availability(901, WEEK)["slots"], {"sat_1800": 2})
-check("missing week is None", store.ref_availability(901, "2099-01-01"), None)
+check("is_active_referee true for an active ref", store.is_active_referee(901), True)
+check("is_active_referee false for a deactivated one", store.is_active_referee(903), False)
+check("is_active_referee false for an unknown id", store.is_active_referee(999), False)
 
-store.set_referee(fid, 901)
+store.claim_referee(fid, 901, "REF")
 check("workload counted", store.ref_workload(WEEK), {901: 1})
+check("roster has the referee",
+      [(r["referee_id"], r["role"]) for r in store.fixture_referees(fid)], [(901, "REF")])
 
-print("\noffers: a decline never comes back to the same ref")
-store.offer(fid, 901)
-check("asked so far", store.refs_already_asked(fid), {901})
-store.resolve_offer(fid, 901, OFFER_DECLINED)
-store.offer(fid, 902)
-check("both now asked", store.refs_already_asked(fid), {901, 902})
-store.resolve_offer(fid, 902, OFFER_ACCEPTED)
-store.set_referee(fid, 902)
+print("\na referee can't be committed to two games in the same slot")
+store.set_schedule(second, "sat_1800", Source.MANAGER_PREFERENCES, Status.SCHEDULED)
+check("committed in that slot", store.ref_committed_in_slot(WEEK, "sat_1800", 901), True)
+check("not committed in a different slot",
+      store.ref_committed_in_slot(WEEK, "sun_1700", 901), False)
+check("excluding its own fixture clears it",
+      store.ref_committed_in_slot(WEEK, "sat_1800", 901, exclude_fixture=fid), False)
+
+print("\ndropping a referee removes them and says so")
+check("drop returns True when someone was removed", store.drop_referee(fid, 901), True)
+check("roster now empty", store.fixture_referees(fid), [])
+check("drop returns False for someone not on it", store.drop_referee(fid, 901), False)
+
+store.claim_referee(fid, 902, "REF")
 store.set_status(fid, Status.FULLY_CONFIRMED)
 check("final state", store.fixture(fid)["status"], Status.FULLY_CONFIRMED)
 
@@ -167,9 +175,8 @@ print("\nthe scheduling log reads as a story")
 # --------------------------------------------------------------------------
 events = [h["event"] for h in store.history(fid)]
 check("in order, nothing lost", events, [
-    "fixture created", "manager submitted", "scheduled", "referee assigned",
-    "referee offered", "referee declined", "referee offered", "referee accepted",
-    "referee assigned", "status -> FULLY_CONFIRMED",
+    "fixture created", "manager submitted", "scheduled", "referee claimed",
+    "referee dropped out", "referee claimed", "status -> FULLY_CONFIRMED",
 ])
 
 # --------------------------------------------------------------------------
@@ -186,6 +193,30 @@ print("\nlisting and filtering")
 check("two fixtures this week", len(store.fixtures(week=WEEK)), 2)
 check("filter by status", [f["id"] for f in store.fixtures(status=Status.FULLY_CONFIRMED)], [fid])
 check("other weeks empty", store.fixtures(week="2099-01-01"), [])
+
+# --------------------------------------------------------------------------
+print("\nreassigning a manager - team mapping vs. what's already snapshotted")
+# --------------------------------------------------------------------------
+store.set_manager("ABC FC", 601)
+store.set_manager("XYZ FC", 602)
+reassign_fid = store.create_fixture("S17_Clubs", WEEK, "ABC FC", "XYZ FC", 601, 602,
+                                    "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY)
+
+check("set_manager alone leaves existing fixtures untouched",
+      store.fixture(reassign_fid)["home_manager_id"], 601)
+store.set_manager("ABC FC", 701)
+check("the mapping moved on", store.manager_of("ABC FC"), 701)
+check("but the fixture still remembers the old manager",
+      store.fixture(reassign_fid)["home_manager_id"], 601)
+
+store.reassign_fixture_managers("ABC FC", 701)
+check("reassign_fixture_managers updates the home side",
+      store.fixture(reassign_fid)["home_manager_id"], 701)
+check("the away side is untouched", store.fixture(reassign_fid)["away_manager_id"], 602)
+
+store.reassign_fixture_managers("XYZ FC", 702)
+check("and it updates the away side too when that's the team",
+      store.fixture(reassign_fid)["away_manager_id"], 702)
 
 # --------------------------------------------------------------------------
 print("\nDiscord's component budget")

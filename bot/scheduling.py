@@ -46,6 +46,7 @@ class Source(str):
 
     MANAGER_PREFERENCES = "MANAGER_PREFERENCES"
     AUTO_FALLBACK = "AUTO_FALLBACK"
+    TEST = "TEST"
 
 
 class Status(str):
@@ -215,4 +216,27 @@ def schedule_from_sheet(slots, home_free, away_free, load=None, busy=(), rng=Non
         reason="random pick from {} valid slot(s) in the timings sheet".format(
             len(candidates)
         ),
+    )
+
+
+def schedule_randomly(slots, load=None, busy=(), rng=None):
+    """Pick any non-conflicting slot at random, ignoring every preference.
+
+    Testing only: lets staff fill a whole gameweek with kickoff times
+    instantly, without forty real submissions, so the downstream flow
+    (referee claiming, the board, the dashboard) can be exercised. The only
+    thing still respected is that a team can't play two games at once.
+    """
+    load = load or {}
+    busy = set(busy)
+    candidates = [slot for slot in slots if slot.key not in busy]
+    if not candidates:
+        return Decision(reason="no free slot left this week for a random pick")
+    rng = rng or random
+    slot = rng.choice(candidates)
+    return Decision(
+        slot=slot,
+        source=Source.TEST,
+        status=Status.SCHEDULED,
+        reason="randomly assigned for testing",
     )
