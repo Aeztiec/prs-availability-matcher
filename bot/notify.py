@@ -172,22 +172,32 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
     header = "**__{}:__**".format(" ".join(parts))
     if season.usable_emoji(season.SEASON_EMOJI):
         header = "{}  {}".format(header, season.SEASON_EMOJI)
+    top = (["||{}||".format(mention), ""] if mention else []) + [header, ""]
 
-    lines = (["||{}||".format(mention), ""] if mention else []) + [header, ""]
+    footer = ["-# Times show in your own timezone. This board updates itself "
+             "as games are claimed."]
 
     if not by_day:
-        lines += ["_No fixtures have a kickoff time yet._", ""]
-    for day in sorted(by_day):
+        return _chunk(top + ["_No fixtures have a kickoff time yet._"], footer=footer)
+
+    # One message per day rather than a character-count split - Friday,
+    # Saturday, Sunday each land on their own message (only the days that
+    # actually have a kickoff yet), so which message is which day is obvious
+    # at a glance instead of depending on wherever a length limit happened to
+    # land. _chunk still runs within a day as a safety net, in case a single
+    # day alone somehow has enough fixtures to need more than one message.
+    days = sorted(by_day)
+    messages = []
+    for index, day in enumerate(days):
+        lines = list(top) if index == 0 else []
         lines.append("**__{} {} {}:__**  📅".format(
             day.strftime("%A"), day.day, day.strftime("%B")
         ))
         for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0]):
             lines.append(referee_board_row(fixture, slot, week, rosters.get(fixture["id"])))
-        lines.append("")
-
-    footer = ["-# Times show in your own timezone. This board updates itself "
-             "as games are claimed."]
-    return _chunk(lines, footer=footer)
+        is_last_day = index == len(days) - 1
+        messages += _chunk(lines, footer=footer if is_last_day else ())
+    return messages
 
 
 def referee_claim_prompt(open_count):
@@ -223,10 +233,14 @@ def no_valid_time(fixture, reason):
 # the master fixture list (spec step 15)
 # --------------------------------------------------------------------------
 
-# Discord rejects a message over 2000 characters outright. Forty fixtures at
-# ~55 characters a row clears that, so the board is split across messages when
-# it needs to be, with headroom for team names longer than the ones tested.
-BOARD_CHUNK = 1800
+# Discord rejects a message over 2000 characters outright, so the board is
+# split across messages when it needs to be. The margin below that is kept
+# small on purpose: a real row is at most a few hundred characters, so there
+# is no realistic way for one to push a message over 2000 even this close to
+# it - and a tighter budget means an ordinary week's worth of fixtures fits
+# in a single message (footer included) instead of spilling one line into a
+# message of its own.
+BOARD_CHUNK = 1950
 
 STATUS_ICON = {
     "FULLY_CONFIRMED": "✅",
