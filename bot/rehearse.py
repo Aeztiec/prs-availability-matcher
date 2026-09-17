@@ -295,10 +295,7 @@ expect("but every fixture still has at least one assistant slot open",
 
 # --------------------------------------------------------------------------
 rule("THE FIXTURE BOARD  ·  /fixture board")
-names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
-rosters = {f["id"]: store.fixture_referees(f["id"]) for f in store.fixtures(week=gw.week)}
-for body in notify.fixture_board(store.fixtures(week=gw.week), gw.week, slot_of,
-                                 referee_names=names, rosters=rosters):
+for body in notify.fixture_board(store.fixtures(week=gw.week), gw.week, slot_of):
     say("")
     for line in body.splitlines():
         say("    " + line)
@@ -307,6 +304,7 @@ rule("THE STAFF DASHBOARD  ·  /fixture list")
 buckets = dashboard(store, week=gw.week)
 waiting_on = {f["id"]: store.unsubmitted_managers(f["id"])
               for f in store.fixtures(week=gw.week)}
+rosters = {f["id"]: store.fixture_referees(f["id"]) for f in store.fixtures(week=gw.week)}
 reasons = {}
 for f in store.fixtures(week=gw.week):
     for entry in reversed(store.history(f["id"])):

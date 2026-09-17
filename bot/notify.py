@@ -21,6 +21,12 @@ from .weeks import discord_time, from_iso, slot_datetime, week_saturday
 
 FOOTER = "-# Times show in your own timezone."
 
+# Discord trims genuinely-empty leading/trailing lines from a message before
+# displaying it, so a plain "" cannot be used to force blank space at the
+# very start or end of one. This renders as nothing but is not whitespace,
+# so there is nothing for Discord to trim away.
+BLANK_LINE = "⠀"
+
 
 def _slot_line(week, slot):
     moment = slot_datetime(week, slot)
@@ -186,15 +192,25 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
     # at a glance instead of depending on wherever a length limit happened to
     # land. _chunk still runs within a day as a safety net, in case a single
     # day alone somehow has enough fixtures to need more than one message.
+    #
+    # A leading blank line on each day's message (after the first) is what
+    # separates it from the one before - Discord groups consecutive messages
+    # from the same bot tightly together with no gap of its own, so the
+    # message's own content has to provide it. A truly empty line does not
+    # work for this: Discord trims leading/trailing blank lines from a
+    # message before displaying it, so a line that is actually empty gets
+    # silently stripped. BLANK_LINE is invisible but not whitespace-only, so
+    # there is nothing for Discord to trim.
     days = sorted(by_day)
     messages = []
     for index, day in enumerate(days):
-        lines = list(top) if index == 0 else []
+        lines = list(top) if index == 0 else [BLANK_LINE]
         lines.append("**__{} {} {}:__**  📅".format(
             day.strftime("%A"), day.day, day.strftime("%B")
         ))
         for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0]):
             lines.append(referee_board_row(fixture, slot, week, rosters.get(fixture["id"])))
+        lines.append("")
         is_last_day = index == len(days) - 1
         messages += _chunk(lines, footer=footer if is_last_day else ())
     return messages
@@ -257,7 +273,7 @@ SOURCE_SHORT = {
 }
 
 
-def board_row(fixture, slot, roster=None, referee_names=None):
+def board_row(fixture, slot):
     """One fixture line: two badges, then the kickoff.
 
     Badges only, no team names - that is how the league's own posts read, and
@@ -265,25 +281,18 @@ def board_row(fixture, slot, roster=None, referee_names=None):
     message limit. A team with no badge configured falls back to its name,
     since an empty side would leave the row meaningless.
 
-    The referee's name is shown, not a mention - a row of @-mentions across a
-    forty-fixture board would ping-highlight the whole thing. Assistants are
-    folded into a "+N" rather than named, to keep the row to one line.
+    Never shows the referee, even once one is assigned - that lives on the
+    referee board and nowhere else, so a manager scanning this one sees the
+    same shape whether a game is fully staffed or not.
     """
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
     when = (discord_time(slot_datetime(fixture["week"], slot), "F")
             if slot else "`TBD`")
-    line = "{} *vs* {} @ {}".format(home, away, when)
-    referee_names = referee_names or {}
-    ref = next((r for r in (roster or []) if r["role"] == ROLE_REF), None)
-    if ref:
-        name = referee_names.get(ref["referee_id"], "referee")
-        extra = len(roster) - 1
-        line += "  -# {}{}".format(name, " (+{} AR)".format(extra) if extra else "")
-    return line
+    return "{} *vs* {} @ {}".format(home, away, when)
 
 
-def fixture_board(fixtures, week, slot_for, referee_names=None, rosters=None,
+def fixture_board(fixtures, week, slot_for,
                   gameweek=None, deadline=None, mention=None, competition=None):
     """The public fixture announcement, grouped by division.
 
@@ -292,9 +301,6 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, rosters=None,
     than it sounds: managers with DMs closed never see a DM, and this is what
     they read instead.
     """
-    referee_names = referee_names or {}
-    rosters = rosters or {}
-
     by_league = {}
     for fixture in fixtures:
         key = fixture.get("league") or "??"
@@ -340,7 +346,6 @@ def fixture_board(fixtures, week, slot_for, referee_names=None, rosters=None,
         for fixture in sorted(rows, key=sort_key):
             lines.append(board_row(
                 fixture, slot_for(fixture["slot_key"]) if fixture["slot_key"] else None,
-                roster=rosters.get(fixture["id"]), referee_names=referee_names,
             ))
         lines.append("")
 

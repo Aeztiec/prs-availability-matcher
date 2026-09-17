@@ -97,26 +97,20 @@ print("\none row of the master list")
 store = fresh_store()
 fid = build_week(store, 1)[0]
 fixture = store.fixture(fid)
-row = board_row(fixture, slot_for(fixture["slot_key"]), roster=store.fixture_referees(fid),
-                referee_names={900: "Ref One"})
+row = board_row(fixture, slot_for(fixture["slot_key"]))
 check("names both teams", "TEAM 0 FC" in row and "OPPO 0 FC" in row, True)
 check("uses the vs format", " *vs* " in row, True)
 check("localised timestamp", "<t:" in row and ":F>" in row, True)
-check("names the referee", "Ref One" in row, True)
 
-print("\nassistants are folded into a +N rather than named")
-store.add_referee(910, "Assistant One")
-store.claim_referee(fid, 910, "AR")
-plus_one = board_row(fixture, slot_for(fixture["slot_key"]), roster=store.fixture_referees(fid),
-                     referee_names={900: "Ref One", 910: "Assistant One"})
-check("shows the referee plus a count", "Ref One (+1 AR)" in plus_one, True)
+print("\nthe referee never appears on this board, staffed or not")
+# That lives on the referee board and nowhere else - a manager should see the
+# same row shape regardless of who, if anyone, is reffing their game.
+check("no referee shown even once one is fully staffed", "-#" in row, False)
 
-print("\nan unreffed fixture shows a dash rather than a blank")
 store = fresh_store()
 fid = build_week(store, 1, confirmed=False)[0]
-unreffed = board_row(store.fixture(fid), slot_for(store.fixture(fid)["slot_key"]),
-                     roster=store.fixture_referees(fid))
-check("no ref shown until one is assigned", "-#" in unreffed, False)
+unreffed = board_row(store.fixture(fid), slot_for(store.fixture(fid)["slot_key"]))
+check("nor when nobody has claimed it yet", "-#" in unreffed, False)
 
 # --------------------------------------------------------------------------
 print("\na realistic 40-fixture week fits Discord's limits")
@@ -289,11 +283,7 @@ for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
     if n % 2 == 0:
         store.set_schedule(fid, SLOTS[n % len(SLOTS)].key,
                            Source.MANAGER_PREFERENCES, Status.SCHEDULED)
-        store.add_referee(800 + n, "Referee Number {}".format(n))
-        store.claim_referee(fid, 800 + n, "REF")
-real_names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
-real = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, referee_names=real_names,
-                     rosters=roster_of(store, store.fixtures(week=WEEK)),
+real = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                      gameweek=gw1, deadline=gw1.deadline)
 check("every message within the limit", all(len(b) <= DISCORD_LIMIT for b in real), True)
 check("all 20 rendered", sum(b.count(" *vs* ") for b in real), 20)
@@ -321,11 +311,7 @@ try:
                                    Status.WAITING_FOR_AVAILABILITY, league=lg)
         store.set_schedule(fid, SLOTS[n % len(SLOTS)].key,
                            Source.MANAGER_PREFERENCES, Status.SCHEDULED)
-        store.add_referee(700 + n, "Referee Longname {}".format(n))
-        store.claim_referee(fid, 700 + n, "REF")
-    badge_names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
-    badged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for, referee_names=badge_names,
-                           rosters=roster_of(store, store.fixtures(week=WEEK)),
+    badged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                            gameweek=gw1, deadline=gw1.deadline)
     check("still within the limit with all 40 badges",
           all(len(b) <= DISCORD_LIMIT for b in badged), True)

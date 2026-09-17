@@ -414,14 +414,14 @@ class PRSBot(discord.Client):
 
     # ---------------------------------------------------------- fixture board
     def board_bodies(self, week):
-        names = {r["discord_id"]: r["name"] for r in self.store.referees(active_only=False)}
         fixtures = self.store.fixtures(week=week)
-        rosters = {f["id"]: self.store.fixture_referees(f["id"]) for f in fixtures}
         gw = next((g for g in season.ALL if g.week == week), None)
         return notify.fixture_board(
-            fixtures, week, self.slot, referee_names=names, rosters=rosters,
+            fixtures, week, self.slot,
             gameweek=gw, deadline=gw.deadline if gw else None,
-            mention=config.ANNOUNCE_MENTION or None,
+            # TEMP: @everyone ping disabled. Re-enable by swapping this back:
+            # mention=config.ANNOUNCE_MENTION or None,
+            mention=None,
             competition=self.timings.competition.competition,
         )
 
