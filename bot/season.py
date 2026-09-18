@@ -29,6 +29,10 @@ SEASON = "S17"
 # How the season reads in a public post's heading: "PRS SEASON 17 GAMEWEEK 1:".
 SEASON_LABEL = "SEASON 17"
 
+# The league's brand colour, used on every embed the bot sends - one place to
+# change it rather than a hex code copied into each call site.
+EMBED_COLOR = 0x35C6C8
+
 # Optional emoji after the heading and after each division name, the way the
 # league's own posts do it. Upload one named after the league code below (PL,
 # BL, LL, SA, L1) and `python -m bot.sync_emoji --write` picks them up.

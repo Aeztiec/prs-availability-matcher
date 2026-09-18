@@ -44,7 +44,8 @@ def _discord_embed(board_embed):
     """Turn a notify.BoardEmbed - plain, testable data - into the real
     discord.Embed object the API actually wants. Kept to this one spot so
     nothing else in this module needs to know discord.Embed's shape."""
-    embed = discord.Embed(description=board_embed.description)
+    embed = discord.Embed(description=board_embed.description,
+                          color=discord.Color(season.EMBED_COLOR))
     if board_embed.title:
         embed.title = board_embed.title
     if board_embed.footer:
