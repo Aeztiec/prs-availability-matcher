@@ -295,7 +295,8 @@ class PRSBot(discord.Client):
         return bodies, prompt, view, digest
 
     async def publish_ref_board(self, week, channel):
-        """Post the referee board, and the claim menu embed under it."""
+        """Post the referee board (one message, more only if a genuinely
+        huge week needs it), and the claim menu embed under it."""
         bodies, prompt, view, digest = self.ref_board_payload(week)
         # Spoilered so it still notifies the role without shouting at the top
         # of the post - same idea the old text board used.
@@ -304,10 +305,14 @@ class PRSBot(discord.Client):
         content = "||{}||".format(mention) if mention else None
         pinging = discord.AllowedMentions(everyone=False, roles=True, users=False)
         quiet = discord.AllowedMentions.none()
-        sent = [await channel.send(
-            content=content, embeds=[_discord_embed(b) for b in bodies],
-            allowed_mentions=pinging,
-        )]
+        groups = notify.group_embeds_for_messages(bodies)
+        sent = []
+        for index, group in enumerate(groups):
+            sent.append(await channel.send(
+                content=content if index == 0 else None,
+                embeds=[_discord_embed(b) for b in group],
+                allowed_mentions=pinging if index == 0 else quiet,
+            ))
         sent.append(await channel.send(
             embed=_discord_embed(prompt), view=view, allowed_mentions=quiet
         ))
@@ -328,20 +333,27 @@ class PRSBot(discord.Client):
         if digest == record.get("digest"):
             return False
         known = self.store.ref_board_message_ids(week)
-        known_board, known_prompt = known[0] if known else None, \
-            (known[1] if len(known) > 1 else None)
+        known_board, known_prompt = (known[:-1], known[-1]) if known else ([], None)
         try:
             channel = self.get_channel(record["channel_id"]) or \
                 await self.fetch_channel(record["channel_id"])
             quiet = discord.AllowedMentions.none()
-            embeds = [_discord_embed(b) for b in bodies]
+            groups = notify.group_embeds_for_messages(bodies)
             live = []
-            if known_board:
-                message = await channel.fetch_message(known_board)
-                await message.edit(embeds=embeds, allowed_mentions=quiet)
-                live.append(message.id)
-            else:
-                live.append((await channel.send(embeds=embeds, allowed_mentions=quiet)).id)
+            for index, group in enumerate(groups):
+                embeds = [_discord_embed(b) for b in group]
+                if index < len(known_board):
+                    message = await channel.fetch_message(known_board[index])
+                    await message.edit(embeds=embeds, allowed_mentions=quiet)
+                    live.append(message.id)
+                else:
+                    live.append((await channel.send(embeds=embeds, allowed_mentions=quiet)).id)
+
+            for stale in known_board[len(groups):]:
+                try:
+                    await (await channel.fetch_message(stale)).delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
 
             prompt_embed = _discord_embed(prompt)
             if known_prompt:
@@ -352,9 +364,19 @@ class PRSBot(discord.Client):
                 live.append((await channel.send(
                     embed=prompt_embed, view=view, allowed_mentions=quiet
                 )).id)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
+        except (discord.NotFound, discord.Forbidden) as error:
+            # Genuinely gone: nothing to edit, so forget it rather than
+            # retrying forever against a message that no longer exists.
             log.warning("referee board for %s unreachable (%s); forgetting it", week, error)
             self.store.forget_ref_board(week)
+            return False
+        except discord.HTTPException as error:
+            # A transient API failure (rate limit, a hiccup on Discord's
+            # side) is not the same as "gone" - the board is still there,
+            # so leave it tracked and let the next pass try again instead
+            # of abandoning it over what might just be bad timing.
+            log.warning("referee board for %s failed to update (%s); will retry next pass",
+                       week, error)
             return False
 
         self.store.set_ref_board(week, record["channel_id"], live, digest)
@@ -472,7 +494,7 @@ class PRSBot(discord.Client):
 
     async def publish_board(self, week, channel, with_button=True):
         """Post the fixture announcement (one message, one embed - more only
-        if a huge gameweek needs it), and the button under it.
+        if a huge gameweek genuinely needs it), and the button under it.
 
         The button is a separate message so the announcement can be edited
         freely without Discord dropping the components, and so the call to
@@ -484,11 +506,16 @@ class PRSBot(discord.Client):
         mention = None
         content = "||{}||".format(mention) if mention else None
         pinging = discord.AllowedMentions(everyone=True, roles=True, users=False)
-        message = await channel.send(
-            content=content, embeds=[_discord_embed(b) for b in bodies],
-            allowed_mentions=pinging,
-        )
-        self.store.set_board(week, channel.id, [message.id],
+        quiet = discord.AllowedMentions.none()
+        groups = notify.group_embeds_for_messages(bodies)
+        sent = []
+        for index, group in enumerate(groups):
+            sent.append(await channel.send(
+                content=content if index == 0 else None,
+                embeds=[_discord_embed(b) for b in group],
+                allowed_mentions=pinging if index == 0 else quiet,
+            ))
+        self.store.set_board(week, channel.id, [m.id for m in sent],
                              notify.board_digest(bodies))
 
         if with_button:
@@ -498,7 +525,7 @@ class PRSBot(discord.Client):
                     embed=_discord_embed(notify.availability_call_to_action(gw, gw.deadline)),
                     view=availability_button(),
                 )
-        return message
+        return sent[0]
 
     async def refresh_board(self, week):
         """Edit the published board in place, if anything actually changed.
@@ -521,23 +548,35 @@ class PRSBot(discord.Client):
             # Mentions are suppressed on every edit: the initial post in
             # publish_board is the only thing allowed to ping.
             quiet = discord.AllowedMentions.none()
-            embeds = [_discord_embed(b) for b in bodies]
-            if known:
-                message = await channel.fetch_message(known[0])
-                await message.edit(embeds=embeds, allowed_mentions=quiet)
-                live = [message.id]
-            else:
-                live = [(await channel.send(embeds=embeds, allowed_mentions=quiet)).id]
+            groups = notify.group_embeds_for_messages(bodies)
+            live = []
+            for index, group in enumerate(groups):
+                embeds = [_discord_embed(b) for b in group]
+                if index < len(known):
+                    message = await channel.fetch_message(known[index])
+                    await message.edit(embeds=embeds, allowed_mentions=quiet)
+                    live.append(message.id)
+                else:
+                    live.append((await channel.send(embeds=embeds, allowed_mentions=quiet)).id)
 
-            for stale in known[1:]:
+            for stale in known[len(groups):]:
                 try:
                     await (await channel.fetch_message(stale)).delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
-            # Deleted or unreachable: forget it rather than retrying forever.
+        except (discord.NotFound, discord.Forbidden) as error:
+            # Genuinely gone: nothing to edit, so forget it rather than
+            # retrying forever against a message that no longer exists.
             log.warning("board for %s unreachable (%s); forgetting it", week, error)
             self.store.forget_board(week)
+            return False
+        except discord.HTTPException as error:
+            # A transient API failure (rate limit, a hiccup on Discord's
+            # side) is not the same as "gone" - the board is still there,
+            # so leave it tracked and let the next pass try again instead
+            # of abandoning it over what might just be bad timing.
+            log.warning("board for %s failed to update (%s); will retry next pass",
+                       week, error)
             return False
 
         self.store.set_board(week, record["channel_id"], live, digest)

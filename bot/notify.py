@@ -447,6 +447,49 @@ def _chunk_description(lines):
     return chunks or [""]
 
 
+# Discord's cap on the *combined* size of every embed attached to one
+# message - title + description + every field's name and value + footer,
+# summed across all of them - not just the 4096-character description limit
+# on each embed individually. A board that needed two embeds under
+# DESCRIPTION_CHUNK could still add up to more than this between them, and
+# Discord rejects the whole send/edit outright rather than truncating - so
+# group_embeds_for_messages() below keeps each message's embeds under this
+# figure, splitting into more messages rather than risk that.
+MESSAGE_EMBED_BUDGET = 5900
+
+
+def _embed_size(embed):
+    """Every character Discord counts toward an embed's share of the
+    combined per-message limit."""
+    size = len(embed.description) + len(embed.title or "") + len(embed.footer or "")
+    for name, value, _ in embed.fields:
+        size += len(name) + len(value)
+    return size
+
+
+def group_embeds_for_messages(embeds):
+    """Split a list of BoardEmbeds into the batches they need to go out
+    as separate messages in, so no single message's combined embed content
+    can ever exceed Discord's real limit. Almost always just one batch -
+    this only bites once a board is genuinely too big for DESCRIPTION_CHUNK
+    alone to have caught.
+    """
+    groups = []
+    current = []
+    total = 0
+    for embed in embeds:
+        size = _embed_size(embed)
+        if current and total + size > MESSAGE_EMBED_BUDGET:
+            groups.append(current)
+            current = []
+            total = 0
+        current.append(embed)
+        total += size
+    if current:
+        groups.append(current)
+    return groups or [[]]
+
+
 def board_digest(bodies):
     """A fingerprint of what was published, to skip no-op edits.
 

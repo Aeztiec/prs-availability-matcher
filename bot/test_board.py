@@ -17,7 +17,10 @@ import tempfile
 
 import bot.notify as notify_module
 from bot.db import Store
-from bot.notify import board_digest, board_row, dashboard_summary, fixture_board, league_tag
+from bot.notify import (
+    BoardEmbed, board_digest, board_row, dashboard_summary, fixture_board,
+    group_embeds_for_messages, league_tag,
+)
 from bot.orchestrator import dashboard
 from bot.scheduling import Source, Status
 from bot.slots import Slot, clean_day, slot_key
@@ -404,6 +407,35 @@ try:
           "your own timezone" in split[-1].footer, True)
 finally:
     notify_module.DESCRIPTION_CHUNK = saved_chunk
+
+# --------------------------------------------------------------------------
+print("\ngrouping embeds into messages under Discord's combined 6000-char cap")
+# --------------------------------------------------------------------------
+# Two embeds that each fit DESCRIPTION_CHUNK on their own can still add up to
+# more than Discord allows in one message together - this is a second,
+# independent budget from the per-embed one, and group_embeds_for_messages()
+# is what actually protects a send/edit from being rejected outright.
+small = [BoardEmbed(description="x" * 100) for _ in range(3)]
+check("small embeds all fit in one message",
+      group_embeds_for_messages(small), [small])
+
+big = [BoardEmbed(description="x" * 4000) for _ in range(2)]
+grouped = group_embeds_for_messages(big)
+check("two embeds too big together split into two messages", len(grouped), 2)
+check("nothing lost in the split",
+      sum(len(g) for g in grouped), 2)
+check("each message stays under the combined budget",
+      all(sum(notify_module._embed_size(e) for e in g) <= notify_module.MESSAGE_EMBED_BUDGET
+          for g in grouped), True)
+
+check("an empty list still returns one (empty) message, never zero",
+      group_embeds_for_messages([]), [[]])
+
+fields_embed = BoardEmbed(description="x" * 100,
+                          fields=[("Deadline", "y" * 500, False)],
+                          footer="z" * 200, title="t" * 50)
+check("_embed_size counts title, description, fields, and footer together",
+      notify_module._embed_size(fields_embed), 50 + 100 + len("Deadline") + 500 + 200)
 
 print("\nthe TBD placeholder")
 tbd_store = fresh_store()
