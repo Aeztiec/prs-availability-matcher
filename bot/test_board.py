@@ -144,8 +144,8 @@ gw1 = _season.gameweek("GW1")
 grouped_embeds = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                                gameweek=gw1, deadline=gw1.deadline)
 grouped = "\n".join(b.description for b in grouped_embeds)
-check("titled with the season and gameweek, underlined and colon-terminated",
-      "**__PRS SEASON 17 GAMEWEEK 1:__**" in grouped, True)
+check("titled with the season and gameweek, as the embed's own title",
+      grouped_embeds[0].title.startswith("PRS SEASON 17 GAMEWEEK 1:"), True)
 check("grouped by division", "**__Premier League:__**" in grouped, True)
 check("every division present",
       all("**__{}:__**".format(n) in grouped for n in _season.LEAGUES.values()), True)
@@ -345,11 +345,11 @@ real_season = _season.SEASON_EMOJI
 _season.LEAGUE_EMOJI = {"PL": "<:PL:123>"}
 _season.SEASON_EMOJI = "<:PRS:456>"
 try:
-    decorated = "\n".join(b.description for b in
-                          fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
-                                       gameweek=gw1, deadline=gw1.deadline))
-    check("season emoji follows the heading",
-          "GAMEWEEK 1:__**  <:PRS:456>" in decorated, True)
+    decorated_embeds = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
+                                     gameweek=gw1, deadline=gw1.deadline)
+    decorated = "\n".join(b.description for b in decorated_embeds)
+    check("season emoji follows the title",
+          decorated_embeds[0].title, "PRS SEASON 17 GAMEWEEK 1: <:PRS:456>")
     check("league emoji follows its division",
           "**__Premier League:__**  <:PL:123>" in decorated, True)
     check("a division without one has no trailing space",

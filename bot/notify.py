@@ -187,24 +187,26 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
         moment = slot_datetime(week, slot)
         by_day.setdefault(moment.date(), []).append((moment, fixture, slot))
 
+    # The embed's own title, not a bolded description line - see fixture_board.
     parts = ["PRS", season.SEASON_LABEL]
     if competition:
         parts.append(competition.upper())
     parts.append((gameweek.label if gameweek else "FIXTURES").upper())
-    header = "**__{}:__**".format(" ".join(parts))
+    title = "{}:".format(" ".join(parts))
     if season.usable_emoji(season.SEASON_EMOJI):
-        header = "{}  {}".format(header, season.SEASON_EMOJI)
+        title = "{} {}".format(title, season.SEASON_EMOJI)
 
     footer_text = ("Times show in your own timezone. This board updates "
                   "itself as games are claimed.")
 
     if not by_day:
         return [BoardEmbed(
-            description=header + "\n\n_No fixtures have a kickoff time yet._",
+            title=title,
+            description="_No fixtures have a kickoff time yet._",
             footer=footer_text,
         )]
 
-    lines = [header, ""]
+    lines = []
     for day in sorted(by_day):
         lines.append("**__{} {} {}:__**  📅".format(
             day.strftime("%A"), day.day, day.strftime("%B")))
@@ -213,7 +215,9 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
                 fixture, slot, week, rosters.get(fixture["id"])))
         lines.append("")
 
-    embeds = [BoardEmbed(description=d) for d in _chunk_description(lines)]
+    chunks = _chunk_description(lines)
+    embeds = [BoardEmbed(title=title if i == 0 else None, description=d)
+             for i, d in enumerate(chunks)]
     embeds[-1].footer = footer_text
     return embeds
 
@@ -308,15 +312,18 @@ def fixture_board(fixtures, week, slot_for,
 
     # "PRS SEASON 17 CLUBS GAMEWEEK 1:" - the competition sits between the
     # season and the gameweek, matching how the league titles its own posts.
+    # The embed's own title, not a bolded description line - Discord already
+    # renders a title bigger and bolder than anything markdown can do inside
+    # the body.
     parts = ["PRS", season.SEASON_LABEL]
     if competition:
         parts.append(competition.upper())
     parts.append((gameweek.label if gameweek else "FIXTURES").upper())
-    header = "**__{}:__**".format(" ".join(parts))
+    title = "{}:".format(" ".join(parts))
     if season.usable_emoji(season.SEASON_EMOJI):
-        header = "{}  {}".format(header, season.SEASON_EMOJI)
+        title = "{} {}".format(title, season.SEASON_EMOJI)
 
-    lines = [header, ""]
+    lines = []
 
     order = list(season.LEAGUES) + sorted(k for k in by_league if k not in season.LEAGUES)
     for key in order:
@@ -350,7 +357,9 @@ def fixture_board(fixtures, week, slot_for,
         lines.append("_No fixtures for this gameweek yet._")
         lines.append("")
 
-    embeds = [BoardEmbed(description=d) for d in _chunk_description(lines)]
+    chunks = _chunk_description(lines)
+    embeds = [BoardEmbed(title=title if i == 0 else None, description=d)
+             for i, d in enumerate(chunks)]
 
     if deadline is not None:
         embeds[-1].fields = [
