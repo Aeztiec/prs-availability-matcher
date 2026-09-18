@@ -363,7 +363,7 @@ finally:
 
 print("\nthe DOM/UEFA tag switches to an emoji once one is uploaded")
 check("blank by default - the text tag, not a stray space or crash",
-      league_tag("PL"), "`(DOM )` ")
+      league_tag("PL"), "`(DOM)` ")
 check("no league at all is just blank", league_tag(None), "")
 real_domestic_tag = _season.DOMESTIC_TAG_EMOJI
 real_uefa_tag = _season.UEFA_TAG_EMOJI
