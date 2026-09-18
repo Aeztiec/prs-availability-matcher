@@ -204,10 +204,6 @@ LEAGUES = {
 # only works because this code is deliberately absent from that dict.
 UEFA_LEAGUE = "UEFA"
 
-# The UEFA competition's own emoji, shown inside the (UEFA) tag. Domestic
-# fixtures use their league's LEAGUE_EMOJI below instead. Same usable_emoji()
-# fallback as the others: blank just leaves the tag without one.
-UEFA_TAG_EMOJI = "<:UEFA:1550535644080508969>"
 
 # home, away, league - transcribed from the published gameweek fixture lists.
 FIXTURES = {

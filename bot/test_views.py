@@ -230,9 +230,9 @@ tagged_store = FakeStore(fixtures=[
 ])
 tagged_heading = WEEK_TARGET.heading(tagged_store, 111)
 check("a domestic league gets tagged DOM",
-      "({}) ABC FC vs XYZ FC".format(season.LEAGUE_EMOJI["PL"]) in tagged_heading, True)
+      "`(DOM)` ABC FC vs XYZ FC" in tagged_heading, True)
 check("anything outside season.LEAGUES gets tagged UEFA",
-      "({}) DEF FC vs GHI FC".format(season.UEFA_TAG_EMOJI) in tagged_heading, True)
+      "`(UEFA)` DEF FC vs GHI FC" in tagged_heading, True)
 check("a fixture with no league at all gets no tag",
       WEEK_TARGET.heading(multi_store, 111).startswith(
           "**__Your fixtures:__** 📋\nABC FC vs XYZ FC"), True)

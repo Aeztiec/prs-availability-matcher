@@ -361,27 +361,10 @@ finally:
     _season.LEAGUE_EMOJI = real_league
     _season.SEASON_EMOJI = real_season
 
-print("\nthe DOM/UEFA tag is just the league's emoji in brackets, no DOM/UEFA text")
-check("a domestic fixture shows its league's emoji",
-      league_tag("PL"), "({}) ".format(_season.LEAGUE_EMOJI["PL"]))
-check("a different league shows its own",
-      league_tag("SA"), "({}) ".format(_season.LEAGUE_EMOJI["SA"]))
-check("UEFA shows the UEFA emoji",
-      league_tag("UEFA"), "({}) ".format(_season.UEFA_TAG_EMOJI))
-check("no backticks - custom emoji don't render inside a code span",
-      "`" in league_tag("PL") or "`" in league_tag("UEFA"), False)
+print("\nthe league tag says DOM or UEFA",)
+check("a domestic fixture is tagged DOM", league_tag("PL"), "`(DOM)` ")
+check("a UEFA fixture is tagged UEFA", league_tag("UEFA"), "`(UEFA)` ")
 check("no league at all is just blank", league_tag(None), "")
-real_league_emoji = dict(_season.LEAGUE_EMOJI)
-real_uefa_tag = _season.UEFA_TAG_EMOJI
-_season.LEAGUE_EMOJI = {}
-_season.UEFA_TAG_EMOJI = ""
-try:
-    check("a league with no usable emoji falls back to the bare word",
-          league_tag("PL"), "(DOM) ")
-    check("UEFA does too", league_tag("UEFA"), "(UEFA) ")
-finally:
-    _season.LEAGUE_EMOJI = real_league_emoji
-    _season.UEFA_TAG_EMOJI = real_uefa_tag
 
 print("\nthe deadline fields and footer stay on the last embed, even split")
 footer_store = fresh_store()

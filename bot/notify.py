@@ -129,21 +129,10 @@ def _roster_line(roster):
 
 
 def league_tag(league):
-    """(<league emoji>) - which league a fixture is in, or the UEFA emoji
-    for a UEFA fixture.
-
-    Plain parentheses rather than a code span: Discord doesn't render custom
-    emoji inside backticks, and the emoji is the whole point. A league with
-    no usable emoji falls back to the bare word, (DOM) or (UEFA), so a tag
-    is never blank.
-    """
+    """(DOM) or (UEFA) - which competition a fixture is in."""
     if not league:
         return ""
-    domestic = league in season.LEAGUES
-    emoji = season.LEAGUE_EMOJI.get(league) if domestic else season.UEFA_TAG_EMOJI
-    if season.usable_emoji(emoji):
-        return "({}) ".format(emoji)
-    return "({}) ".format("DOM" if domestic else "UEFA")
+    return "`({})` ".format("DOM" if league in season.LEAGUES else "UEFA")
 
 
 def referee_board_row(fixture, slot, week, roster=()):
