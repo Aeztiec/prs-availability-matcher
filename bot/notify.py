@@ -187,7 +187,6 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
         for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0]):
             block.append(referee_board_row(
                 fixture, slot, week, rosters.get(fixture["id"]), letters))
-        block.append("")
         blocks.append(block)
 
     chunks = []
@@ -306,7 +305,8 @@ def fixture_board(fixtures, week, slot_for,
 
     if not fixtures:
         lines.append("_No fixtures for this gameweek yet._")
-        lines.append("")
+    while lines and lines[-1] == "":
+        lines.pop()   # no empty line hanging under the last row
 
     chunks = _chunk_description(lines)
     embeds = [BoardEmbed(title=title if i == 0 else None, description=d)
