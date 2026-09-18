@@ -110,12 +110,14 @@ def header(fixture, competition=None, round_name=None):
 
 
 def score_line(fixture, home_score, away_score, pens=None):
-    score = "{} - {}".format(home_score, away_score)
-    if pens:
-        score += " [{} - {} ON PENS]".format(*pens)
-    return "{} **{}** {}".format(
-        season.label_for(fixture["home_team"]), score,
+    """'<home> **5 - 1** <away> **[5 - 4 ON PENS]**': the away badge sits
+    right after the score, and any shootout follows it."""
+    line = "{} **{} - {}** {}".format(
+        season.label_for(fixture["home_team"]), home_score, away_score,
         season.label_for(fixture["away_team"]))
+    if pens:
+        line += " **[{} - {} ON PENS]**".format(*pens)
+    return line
 
 
 def build(fixture, home_score, away_score, stats_home, stats_away, motm,

@@ -76,7 +76,7 @@ check("overrides for a knockout",
 check("score in bold between the badges",
       score_line(FIXTURE, 3, 3), "{} **3 - 3** {}".format(PORTO, PSG))
 check("with a shootout", score_line(FIXTURE, 3, 3, (5, 4)),
-      "{} **3 - 3 [5 - 4 ON PENS]** {}".format(PORTO, PSG))
+      "{} **3 - 3** {} **[5 - 4 ON PENS]**".format(PORTO, PSG))
 
 print("\nbuilding the post")
 text, problems = build(
