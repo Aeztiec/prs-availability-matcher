@@ -147,15 +147,15 @@ gw1 = _season.gameweek("GW1")
 grouped_embeds = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                                gameweek=gw1, deadline=gw1.deadline)
 grouped = "\n".join(b.description for b in grouped_embeds)
-check("titled with the season and gameweek",
-      "**PRS SEASON 17 GAMEWEEK 1**" in grouped, True)
+check("titled with the season and gameweek, underlined and colon-terminated",
+      "**__PRS SEASON 17 GAMEWEEK 1:__**" in grouped, True)
 check("grouped by division", "**__Premier League:__**" in grouped, True)
 check("every division present",
       all("**__{}:__**".format(n) in grouped for n in _season.LEAGUES.values()), True)
 check("divisions in a fixed order",
       grouped.index("Premier League:") < grouped.index("Bundesliga:"), True)
 check("the deadline is a field on the last embed",
-      any(name == "__Scheduling Deadline:__" for name, _, _ in grouped_embeds[-1].fields),
+      any(name == "Scheduling Deadline" for name, _, _ in grouped_embeds[-1].fields),
       True)
 check("deadline and extension both stack full-width, not side by side",
       all(inline is False for _, _, inline in grouped_embeds[-1].fields), True)
@@ -348,7 +348,7 @@ try:
                           fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                                        gameweek=gw1, deadline=gw1.deadline))
     check("season emoji follows the heading",
-          "GAMEWEEK 1**  <:PRS:456>" in decorated, True)
+          "GAMEWEEK 1:__**  <:PRS:456>" in decorated, True)
     check("league emoji follows its division",
           "**__Premier League:__**  <:PL:123>" in decorated, True)
     check("a division without one has no trailing space",
@@ -375,7 +375,7 @@ try:
     check("only the last embed carries the deadline fields",
           all(e.fields == [] for e in split[:-1]), True)
     check("the last embed has the deadline field",
-          any(name == "__Scheduling Deadline:__" for name, _, _ in split[-1].fields), True)
+          any(name == "Scheduling Deadline" for name, _, _ in split[-1].fields), True)
     check("only the last embed carries the footer",
           all(e.footer is None for e in split[:-1]), True)
     check("the last embed's footer explains the deadline",

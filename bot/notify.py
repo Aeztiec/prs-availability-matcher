@@ -194,7 +194,7 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
     if competition:
         parts.append(competition.upper())
     parts.append((gameweek.label if gameweek else "FIXTURES").upper())
-    header = "**{}**".format(" ".join(parts))
+    header = "**__{}:__**".format(" ".join(parts))
     if season.usable_emoji(season.SEASON_EMOJI):
         header = "{}  {}".format(header, season.SEASON_EMOJI)
 
@@ -312,13 +312,13 @@ def fixture_board(fixtures, week, slot_for,
         key = fixture.get("league") or "??"
         by_league.setdefault(key, []).append(fixture)
 
-    # "PRS SEASON 17 CLUBS GAMEWEEK 1" - the competition sits between the
+    # "PRS SEASON 17 CLUBS GAMEWEEK 1:" - the competition sits between the
     # season and the gameweek, matching how the league titles its own posts.
     parts = ["PRS", season.SEASON_LABEL]
     if competition:
         parts.append(competition.upper())
     parts.append((gameweek.label if gameweek else "FIXTURES").upper())
-    header = "**{}**".format(" ".join(parts))
+    header = "**__{}:__**".format(" ".join(parts))
     if season.usable_emoji(season.SEASON_EMOJI):
         header = "{}  {}".format(header, season.SEASON_EMOJI)
 
@@ -360,9 +360,8 @@ def fixture_board(fixtures, week, slot_for,
 
     if deadline is not None:
         embeds[-1].fields = [
-            ("__Scheduling Deadline:__", discord_time(deadline, "F"), False),
-            ("__Scheduling Extension:__",
-             discord_time(deadline + timedelta(days=7), "F"), False),
+            ("Scheduling Deadline", discord_time(deadline, "F"), False),
+            ("Scheduling Extension", discord_time(deadline + timedelta(days=7), "F"), False),
         ]
     embeds[-1].footer = (
         "Not agreed by then and Officials set the time from your submitted "
