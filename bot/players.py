@@ -14,6 +14,12 @@ import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PATH = os.path.join(os.path.dirname(HERE), "data", "players.csv")
 FREE_AGENT = "FREE AGENT"
+CLASS_ORDER = ["X", "S", "A", "B", "C"]   # best to worst
+
+
+def _wage(row):
+    digits = "".join(ch for ch in (row.get("WAGE") or "") if ch.isdigit())
+    return int(digits) if digits else 0
 
 
 def _key(name):
@@ -47,6 +53,12 @@ class Players:
         return [self._by_name[k]["USERNAME"] for k in close]
 
     def roster(self, club):
-        """Usernames of the players signed to a club, A to Z."""
-        return sorted((r["USERNAME"] for r in self.rows
-                       if r["CLUB"] == club and r["ROLE"] == "PLAYER"), key=str.lower)
+        """Usernames of the players signed to a club, best class first (X, S,
+        A, B, C), then highest wage, then A to Z. The first seven are who
+        usually starts, the rest the bench."""
+        def order(row):
+            return (CLASS_ORDER.index(row.get("C")) if row.get("C") in CLASS_ORDER
+                    else len(CLASS_ORDER), -_wage(row), row["USERNAME"].lower())
+        return [r["USERNAME"] for r in sorted(
+            (r for r in self.rows if r["CLUB"] == club and r["ROLE"] == "PLAYER"),
+            key=order)]

@@ -35,10 +35,11 @@ def rows_of(text, section):
 
 
 SHEET = Players([
-    {"USERNAME": "vzcadc", "CLUB": "FC PORTO", "ROLE": "PLAYER"},
-    {"USERNAME": "_gawa", "CLUB": "FC PORTO", "ROLE": "PLAYER"},
-    {"USERNAME": "danielfly", "CLUB": "FC PORTO", "ROLE": "PLAYER"},
-    {"USERNAME": "benchguy", "CLUB": "FC PORTO", "ROLE": "PLAYER"},
+    {"USERNAME": "vzcadc", "CLUB": "FC PORTO", "ROLE": "PLAYER", "C": "B", "WAGE": "$150,000"},
+    {"USERNAME": "_gawa", "CLUB": "FC PORTO", "ROLE": "PLAYER", "C": "C", "WAGE": "$75,000"},
+    {"USERNAME": "danielfly", "CLUB": "FC PORTO", "ROLE": "PLAYER", "C": "S", "WAGE": "$400,000"},
+    {"USERNAME": "benchguy", "CLUB": "FC PORTO", "ROLE": "PLAYER", "C": "C", "WAGE": "$75,000"},
+    {"USERNAME": "topdog", "CLUB": "FC PORTO", "ROLE": "PLAYER", "C": "S", "WAGE": "$450,000"},
     {"USERNAME": "FelipeF", "CLUB": "PARIS SAINT-GERMAIN", "ROLE": "PLAYER"},
     {"USERNAME": "om_ena", "CLUB": "PARIS SAINT-GERMAIN", "ROLE": "PLAYER"},
     {"USERNAME": "nobody_fc", "CLUB": "ARSENAL", "ROLE": "PLAYER"},
@@ -53,8 +54,8 @@ print("the player sheet")
 check("finds a username in any case", SHEET.find("VZCADC")["club"], "FC PORTO")
 check("ignores a leading @", SHEET.find("@_gawa")["username"], "_gawa")
 check("unknown is None", SHEET.find("ghost"), None)
-check("roster is players only, A to Z",
-      SHEET.roster("FC PORTO"), ["_gawa", "benchguy", "danielfly", "vzcadc"])
+check("roster is players only, best class first, then wage, then A to Z",
+      SHEET.roster("FC PORTO"), ["topdog", "danielfly", "vzcadc", "_gawa", "benchguy"])
 check("suggests a close match", SHEET.suggest("vzcad"), ["vzcadc"])
 
 print("\nparsing a line")
