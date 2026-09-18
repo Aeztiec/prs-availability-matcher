@@ -119,6 +119,39 @@ for gw in season.ALL:
 check("every pairing at most once", max(pairings.values()), 1)
 
 # --------------------------------------------------------------------------
+print("\nthe UEFA League Phase, alongside the domestic fixtures")
+# --------------------------------------------------------------------------
+uefa_weeks = [gw for gw in season.ALL if gw.has_uefa_fixtures]
+check("GW1 through GW5 have a UEFA round", [g.key for g in uefa_weeks],
+      ["GW1", "GW2", "GW3", "GW4", "GW5"])
+check("GW6 and GW7 have none",
+      [season.gameweek(k).has_uefa_fixtures for k in ("GW6", "GW7")], [False, False])
+
+for gw in uefa_weeks:
+    codes = [c for row in gw.uefa_fixtures for c in row[:2]]
+    check("{}: 20 UEFA fixtures".format(gw.key), len(gw.uefa_fixtures), 20)
+    check("{}: every team plays exactly once in UEFA too".format(gw.key),
+          (len(codes), len(set(codes))), (40, 40))
+    check("{}: every row tagged UEFA_LEAGUE".format(gw.key),
+          {row[2] for row in gw.uefa_fixtures}, {season.UEFA_LEAGUE})
+
+check("UEFA is deliberately not one of the five domestic leagues",
+      season.UEFA_LEAGUE in season.LEAGUES, False)
+
+print("\nsome pairings repeat across both competitions in the same week")
+# The source list isn't shy about it - Real Sociedad v Barcelona in GW3 is
+# both that week's La Liga fixture and that week's UEFA one. Not a
+# transcription slip: db.fixture_for() has to tell the two apart by league,
+# see the test below, or opening a gameweek would silently skip the second.
+repeats = {
+    gw.key: {frozenset(row[:2]) for row in gw.fixtures}
+             & {frozenset(row[:2]) for row in gw.uefa_fixtures}
+    for gw in uefa_weeks
+}
+repeats = {k: v for k, v in repeats.items() if v}
+check("at least one gameweek really does repeat a pairing", bool(repeats), True)
+
+# --------------------------------------------------------------------------
 print("\nthe kickoff floor is respected")
 # --------------------------------------------------------------------------
 sheet = av.build_sheet(av.load_sheet(av.find_competition("S17_Clubs")))
@@ -206,6 +239,25 @@ check("found by pairing",
       store.fixture_for("GW1", "ARSENAL", "MANCHESTER CITY")["id"], fid)
 check("reversed pairing is a different fixture",
       store.fixture_for("GW1", "MANCHESTER CITY", "ARSENAL"), None)
+
+print("\nthe same pairing can exist twice in a gameweek - once per competition")
+# What the real GW3 fixture list does with Real Sociedad v Barcelona: a
+# domestic fixture and a UEFA one, same two teams, same week.
+domestic_fid = store.create_fixture("S17_Clubs", "2026-09-19", "REAL SOCIEDAD", "BARCELONA",
+                                    3, 4, "2026-09-16T23:59:00Z", "WAITING_FOR_AVAILABILITY",
+                                    gameweek="GW1", league="LL")
+uefa_fid = store.create_fixture("S17_Clubs", "2026-09-19", "REAL SOCIEDAD", "BARCELONA",
+                                3, 4, "2026-09-16T23:59:00Z", "WAITING_FOR_AVAILABILITY",
+                                gameweek="GW1", league="UEFA")
+check("two distinct fixtures, not a duplicate", domestic_fid != uefa_fid, True)
+check("league picks out the domestic one",
+      store.fixture_for("GW1", "REAL SOCIEDAD", "BARCELONA", league="LL")["id"],
+      domestic_fid)
+check("league picks out the UEFA one",
+      store.fixture_for("GW1", "REAL SOCIEDAD", "BARCELONA", league="UEFA")["id"],
+      uefa_fid)
+check("without a league it just finds a match, same as before",
+      store.fixture_for("GW1", "REAL SOCIEDAD", "BARCELONA") is not None, True)
 
 print("\nmanager mapping")
 check("nobody set yet", store.manager_of("ARSENAL"), None)

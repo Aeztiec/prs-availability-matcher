@@ -199,6 +199,11 @@ LEAGUES = {
     "L1": "Ligue 1",
 }
 
+# The cross-league competition, kept out of LEAGUES on purpose - notify's
+# league_tag() labels anything not in LEAGUES "UEFA" for display, and that
+# only works because this code is deliberately absent from that dict.
+UEFA_LEAGUE = "UEFA"
+
 # home, away, league - transcribed from the published gameweek fixture lists.
 FIXTURES = {
     "GW1": [
@@ -252,6 +257,42 @@ FIXTURES = {
     ],
 }
 
+# home, away - the UEFA League Phase, cross-league so no `league` column is
+# needed here (every row is UEFA_LEAGUE). Runs GW1-GW5 only; GW6 and GW7
+# have no UEFA fixtures published, same as the source it's transcribed from.
+UEFA_FIXTURES = {
+    "GW1": [
+        ("ACM", "ARS"), ("ASM", "MUN"), ("SCF", "ROM"), ("AST", "RCS"), ("LIV", "ATA"),
+        ("ATM", "BVB"), ("FCB", "OLL"), ("B04", "INT"), ("PSG", "BAY"), ("NEW", "CHE"),
+        ("RCL", "COM"), ("VIL", "FRA"), ("JUV", "SEV"), ("LAZ", "OGC"), ("TOT", "LIL"),
+        ("NAP", "MCI"), ("RSO", "OLM"), ("RBL", "BET"), ("VFB", "RMA"), ("VAL", "S04"),
+    ],
+    "GW2": [
+        ("OLL", "ACM"), ("ARS", "COM"), ("ASM", "BVB"), ("ROM", "AST"), ("ATA", "FCB"),
+        ("ATM", "LAZ"), ("B04", "RBL"), ("BAY", "SCF"), ("CHE", "RSO"), ("FRA", "MCI"),
+        ("MUN", "INT"), ("JUV", "LIL"), ("LIV", "VAL"), ("NAP", "VFB"), ("RMA", "NEW"),
+        ("OLM", "OGC"), ("PSG", "SEV"), ("RCL", "TOT"), ("VIL", "BET"), ("RCS", "S04"),
+    ],
+    "GW3": [
+        ("NEW", "ACM"), ("MUN", "ARS"), ("OLM", "ASM"), ("VIL", "ROM"), ("AST", "FRA"),
+        ("LIL", "ATA"), ("B04", "ATM"), ("RSO", "FCB"), ("BAY", "RCL"), ("BVB", "RBL"),
+        ("MCI", "CHE"), ("COM", "VFB"), ("VAL", "SCF"), ("INT", "SEV"), ("LIV", "JUV"),
+        ("BET", "LAZ"), ("NAP", "TOT"), ("OGC", "RMA"), ("RCS", "OLL"), ("S04", "PSG"),
+    ],
+    "GW4": [
+        ("ACM", "SCF"), ("CHE", "ARS"), ("VFB", "ASM"), ("S04", "ROM"), ("AST", "NAP"),
+        ("ATA", "LAZ"), ("COM", "ATM"), ("INT", "FCB"), ("RMA", "B04"), ("BAY", "NEW"),
+        ("BET", "BVB"), ("SEV", "FRA"), ("RCS", "JUV"), ("TOT", "LIV"), ("MCI", "LIL"),
+        ("RSO", "MUN"), ("OGC", "RCL"), ("PSG", "OLM"), ("OLL", "VAL"), ("RBL", "VIL"),
+    ],
+    "GW5": [
+        ("S04", "ACM"), ("ARS", "PSG"), ("ASM", "RCS"), ("ROM", "BAY"), ("NEW", "AST"),
+        ("ATA", "RSO"), ("ATM", "MUN"), ("FCB", "RMA"), ("FRA", "B04"), ("BVB", "VIL"),
+        ("SEV", "CHE"), ("BET", "COM"), ("SCF", "RCL"), ("INT", "VAL"), ("JUV", "MCI"),
+        ("LAZ", "TOT"), ("OLL", "LIV"), ("LIL", "OLM"), ("OGC", "NAP"), ("VFB", "RBL"),
+    ],
+}
+
 
 # --------------------------------------------------------------------------
 
@@ -284,6 +325,17 @@ class Gameweek:
     @property
     def has_fixtures(self):
         return bool(self.fixtures)
+
+    @property
+    def uefa_fixtures(self):
+        """The UEFA League Phase pairings for this gameweek, in the same
+        (home, away, league) shape as .fixtures - so a caller can just
+        concatenate the two instead of handling them differently."""
+        return [(home, away, UEFA_LEAGUE) for home, away in UEFA_FIXTURES.get(self.key, [])]
+
+    @property
+    def has_uefa_fixtures(self):
+        return bool(self.uefa_fixtures)
 
     def __repr__(self):
         return "<{} {}>".format(self.key, self.friday.date())
@@ -376,6 +428,29 @@ def validate(sheet_team_names):
     for key in FIXTURES:
         if key not in BY_KEY:
             problems.append("fixtures for unknown gameweek '{}'".format(key))
+
+    # UEFA is a separate competition, not a sixth domestic league - a team
+    # plays once in FIXTURES and, in weeks it has one, once more here, so
+    # this is checked on its own rather than folded into the loop above
+    # (which would wrongly flag every team as "appears twice").
+    for key, rows in UEFA_FIXTURES.items():
+        seen = {}
+        for home, away in rows:
+            for code in (home, away):
+                if code not in TEAM_CODES:
+                    problems.append("{} (UEFA): unknown code '{}'".format(key, code))
+            if home == away:
+                problems.append("{} (UEFA): {} plays itself".format(key, home))
+            for code in (home, away):
+                if code in seen:
+                    problems.append("{} (UEFA): {} appears twice ({} and {})".format(
+                        key, code, seen[code], "{} v {}".format(home, away)))
+                else:
+                    seen[code] = "{} v {}".format(home, away)
+
+    for key in UEFA_FIXTURES:
+        if key not in BY_KEY:
+            problems.append("UEFA fixtures for unknown gameweek '{}'".format(key))
 
     return problems
 

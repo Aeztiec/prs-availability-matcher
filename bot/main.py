@@ -425,17 +425,21 @@ class PRSBot(discord.Client):
         ]
 
     async def create_gameweek_fixtures(self, gw, manager_of, opened_by=None, limit=None):
-        """Create every fixture in a gameweek and DM both managers.
+        """Create every fixture in a gameweek - domestic and UEFA both - and
+        DM both managers.
 
         Idempotent: a pairing that already exists is skipped, so running this
-        twice does not duplicate fixtures or spam twenty people again.
+        twice does not duplicate fixtures or spam twenty people again. A team
+        with a UEFA fixture that week also has a domestic one, same as
+        real life - the weekly submission covers both without asking twice.
         """
         made, skipped = [], []
-        wanted = gw.fixtures[:limit] if limit else gw.fixtures
+        all_fixtures = gw.fixtures + gw.uefa_fixtures
+        wanted = all_fixtures[:limit] if limit else all_fixtures
         for home_code, away_code, league in wanted:
             home = season.team_name(home_code)
             away = season.team_name(away_code)
-            if self.store.fixture_for(gw.key, home, away):
+            if self.store.fixture_for(gw.key, home, away, league=league):
                 skipped.append("{} v {}".format(home_code, away_code))
                 continue
             home_id = manager_of.get(home)
@@ -1103,7 +1107,7 @@ def register(bot):
         if count:
             parts.append("-# Limited to the first {} of {} fixtures. Run again "
                          "without `count` to create the rest.".format(
-                             count, len(gw.fixtures)))
+                             count, len(gw.fixtures) + len(gw.uefa_fixtures)))
         if skipped:
             parts.append("Skipped {}: {}".format(len(skipped), ", ".join(skipped[:8])))
         await interaction.followup.send("\n".join(parts), ephemeral=True)

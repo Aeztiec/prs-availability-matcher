@@ -564,18 +564,24 @@ class Store:
             return {r["gameweek"] for r in conn.execute(
                 "SELECT gameweek FROM open_gameweeks")}
 
-    def fixture_for(self, gameweek, home_team, away_team):
+    def fixture_for(self, gameweek, home_team, away_team, league=None):
         """An existing fixture for this pairing in this gameweek, if any.
 
-        Used to make opening a gameweek idempotent - running it twice must not
-        create twenty duplicate fixtures and DM everyone again.
+        Used to make opening a gameweek idempotent - running it twice must
+        not create duplicate fixtures and DM everyone again. `league`
+        narrows the match to one competition - the same two teams
+        occasionally play each other twice in a gameweek, once
+        domestically and once in the UEFA League Phase, and without it
+        the second would look like a duplicate of the first and get
+        silently skipped.
         """
+        sql = "SELECT * FROM fixtures WHERE gameweek=? AND home_team=? AND away_team=?"
+        args = [gameweek, home_team, away_team]
+        if league is not None:
+            sql += " AND league=?"
+            args.append(league)
         with self._connect() as conn:
-            row = conn.execute(
-                """SELECT * FROM fixtures
-                   WHERE gameweek=? AND home_team=? AND away_team=?""",
-                (gameweek, home_team, away_team),
-            ).fetchone()
+            row = conn.execute(sql, args).fetchone()
         return dict(row) if row else None
 
     # ------------------------------------------------------------ managers
