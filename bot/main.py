@@ -1337,12 +1337,25 @@ def register(bot):
     # ----------------------------------------------------------------- result
     players = Players.load()
 
-    class ResultForm(discord.ui.Modal):
-        """One box per section; the team boxes start filled with that club's
-        players from the sheet, so staff delete who didn't play and add the
-        stats to who did, and Officials starts with whoever claimed the game."""
+    STARTERS = 7
 
-        def __init__(self, fixture, home_score, away_score, competition, round_name):
+    def starting_lines(club):
+        """The club's sheet players: the first seven as starters, then a BENCH
+        line and the rest. Staff prune it down to who actually played."""
+        roster = players.roster(club)
+        lines = roster[:STARTERS]
+        if roster[STARTERS:]:
+            lines += ["BENCH"] + roster[STARTERS:]
+        return chr(10).join(lines)
+
+    OFFICIAL_ROLE = {referees.ROLE_REF: "Main Referee", referees.ROLE_AR: "Assistant Referee"}
+
+    class ResultForm(discord.ui.Modal):
+        """One box per section. The team boxes start filled with that club's
+        players from the sheet and Officials with whoever claimed the game, so
+        staff delete and add rather than type everything."""
+
+        def __init__(self, fixture, home_score, away_score, competition, round_name, pens):
             super().__init__(title="Result: {} vs {}".format(
                 season.team_code(fixture["home_team"]) or "HOME",
                 season.team_code(fixture["away_team"]) or "AWAY")[:45])
@@ -1350,34 +1363,33 @@ def register(bot):
             self.scores = (home_score, away_score)
             self.competition = competition
             self.round_name = round_name
+            self.pens = pens
 
-            def box(label, default="", required=False, placeholder=None):
+            def box(label, default="", placeholder=None):
                 item = discord.ui.TextInput(
-                    label=label[:45], style=discord.TextStyle.paragraph, default=default[:4000],
-                    required=required, max_length=4000, placeholder=placeholder)
+                    label=label[:45], style=discord.TextStyle.paragraph,
+                    default=default[:4000], required=False, max_length=4000,
+                    placeholder=placeholder)
                 self.add_item(item)
                 return item
 
             self.home = box("{} stats".format(fixture["home_team"].title()),
-                            chr(10).join(players.roster(fixture["home_team"])),
-                            placeholder="username g g a")
+                            starting_lines(fixture["home_team"]), "username g g a")
             self.away = box("{} stats".format(fixture["away_team"].title()),
-                            chr(10).join(players.roster(fixture["away_team"])),
-                            placeholder="username g g a")
-            self.subs = box("Subs", placeholder="username sub")
-            self.motm = box("MOTM & mentions (best first, up to 4)", placeholder="username")
+                            starting_lines(fixture["away_team"]), "username g g a")
+            self.motm = box("MOTM & mentions", placeholder="username - short note (optional)")
             names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
-            assigned = [names[r["referee_id"]]
-                        for r in store.fixture_referees(fixture["id"])
-                        if r["referee_id"] in names]
-            self.officials = box("Officials", chr(10).join(assigned),
-                                 placeholder="username")
+            crew = [names[r["referee_id"]] + " - " + OFFICIAL_ROLE[r["role"]] + " [Full 90']"
+                    for r in store.fixture_referees(fixture["id"])
+                    if r["referee_id"] in names]
+            self.officials = box("Officiating team", chr(10).join(crew),
+                                 "username - Main Referee [Full 90']")
 
         async def on_submit(self, interaction):
             text, problems = results.build(
                 self.fixture, self.scores[0], self.scores[1], self.home.value,
-                self.away.value, self.subs.value, self.motm.value,
-                self.officials.value, players, self.competition, self.round_name)
+                self.away.value, self.motm.value, self.officials.value, players,
+                self.competition, self.round_name, self.pens)
             if problems:
                 await interaction.response.send_message(
                     embed=_discord_embed(notify.BoardEmbed(
@@ -1399,23 +1411,32 @@ def register(bot):
         game="The game - pick from the list as you type",
         home_score="Home team's goals",
         away_score="Away team's goals",
-        competition="Shown in the heading if not the league (e.g. UCL)",
-        round="Shown in the heading if not the gameweek (e.g. Round of 16 Leg 1)",
+        home_pens="Home team's penalty shootout goals, if there was one",
+        away_pens="Away team's penalty shootout goals, if there was one",
+        competition="Shown in the heading if not the league (e.g. UEFA Champions League)",
+        round="Shown in the heading if not the gameweek (e.g. Final)",
     )
     @staff_only()
     async def result(interaction, game: str, home_score: app_commands.Range[int, 0, 99],
                      away_score: app_commands.Range[int, 0, 99],
+                     home_pens: app_commands.Range[int, 0, 99] = None,
+                     away_pens: app_commands.Range[int, 0, 99] = None,
                      competition: str = None, round: str = None):
         record = await resolve_game(interaction, game)
         if record is None:
+            return
+        if (home_pens is None) != (away_pens is None):
+            await interaction.response.send_message(
+                "Give both penalty scores, or neither.", ephemeral=True)
             return
         if not players.rows:
             await interaction.response.send_message(
                 "The player sheet (data/players.csv) is missing, so I can't check "
                 "usernames.", ephemeral=True)
             return
+        pens = None if home_pens is None else (home_pens, away_pens)
         await interaction.response.send_modal(
-            ResultForm(record, home_score, away_score, competition, round))
+            ResultForm(record, home_score, away_score, competition, round, pens))
 
     result.autocomplete("game")(game_autocomplete())
 
