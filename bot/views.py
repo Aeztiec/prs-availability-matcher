@@ -130,7 +130,7 @@ def _discord_embed(board_embed):
     Duplicates main.py's helper of the same name rather than importing it -
     main.py imports this module, so the reverse import would cycle.
     """
-    embed = discord.Embed(description=notify.widen(board_embed.description),
+    embed = discord.Embed(description=board_embed.description,
                           color=discord.Color(season.EMBED_COLOR))
     if board_embed.title:
         embed.title = board_embed.title
@@ -138,6 +138,7 @@ def _discord_embed(board_embed):
         embed.set_footer(text=board_embed.footer)
     for name, value, inline in board_embed.fields:
         embed.add_field(name=name, value=value, inline=inline)
+    embed.set_image(url=season.EMBED_WIDTH_IMAGE)
     return embed
 
 

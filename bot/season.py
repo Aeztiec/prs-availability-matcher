@@ -33,6 +33,14 @@ SEASON_LABEL = "SEASON 17"
 # change it rather than a hex code copied into each call site.
 EMBED_COLOR = 0xFF13F0
 
+# Discord sizes an embed to its widest content, so short ones come out narrow.
+# Every embed carries this invisible 1200x1 transparent image, which stretches
+# it to the full width on any device (text padding can only be tuned to one
+# screen). It is served from this repo, so assets/embed_width.png has to be
+# pushed to main for it to load.
+EMBED_WIDTH_IMAGE = ("https://raw.githubusercontent.com/Aeztiec/"
+                     "prs-availability-matcher/main/assets/embed_width.png")
+
 # Optional emoji after the heading and after each division name, the way the
 # league's own posts do it. Upload one named after the league code below (PL,
 # BL, LL, SA, L1) and `python -m bot.sync_emoji --write` picks them up.

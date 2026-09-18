@@ -444,9 +444,9 @@ check("an empty list still returns one (empty) message, never zero",
 fields_embed = BoardEmbed(description="x" * 100,
                           fields=[("Deadline", "y" * 500, False)],
                           footer="z" * 200, title="t" * 50)
-check("_embed_size counts title, description, fields, footer and the width padding",
+check("_embed_size counts title, description, fields, and footer together",
       notify_module._embed_size(fields_embed),
-      50 + 100 + len("Deadline") + 500 + 200 + notify_module.EMBED_PAD + 1)
+      50 + 100 + len("Deadline") + 500 + 200)
 
 print("\nthe TBD placeholder")
 tbd_store = fresh_store()
@@ -490,13 +490,14 @@ check("field never over the limit", len(_rows_field(rows)) <= 1024, True)
 
 
 
-print(chr(10) + "every embed is padded to full width")
-from bot.notify import widen, EMBED_PAD, BLANK, DESCRIPTION_CHUNK
-check("padding is a line of invisible characters under the text",
-      widen("short"), "short" + chr(10) + BLANK * EMBED_PAD)
-check("an empty description still gets it", widen(None), BLANK * EMBED_PAD)
-check("padded chunks still fit Discord's 4096", DESCRIPTION_CHUNK + EMBED_PAD + 1 <= 4096, True)
-check("blank is not trimmed as whitespace", widen("x").strip().endswith(BLANK), True)
+print(chr(10) + "every embed is stretched to full width by the invisible image")
+check("the width image is served from this repo's main branch",
+      _season.EMBED_WIDTH_IMAGE.startswith(
+          "https://raw.githubusercontent.com/Aeztiec/prs-availability-matcher/main/"), True)
+import os as _os
+check("and the file it points at exists in the repo",
+      _os.path.exists(_os.path.join(_os.path.dirname(_os.path.dirname(
+          _os.path.abspath(__file__))), "assets", "embed_width.png")), True)
 
 
 # --------------------------------------------------------------------------
