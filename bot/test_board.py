@@ -114,6 +114,9 @@ row = board_row(fixture, slot_for(fixture["slot_key"]))
 check("names both teams", "TEAM 0 FC" in row and "OPPO 0 FC" in row, True)
 check("uses the vs format", " *vs* " in row, True)
 check("localised timestamp", "<t:" in row and ":F>" in row, True)
+from bot.notify import referee_board_row as _ref_row
+ref_row = _ref_row(fixture, slot_for(fixture["slot_key"]), fixture["week"])
+check("the referee board shows just the time", ":t>" in ref_row and ":F>" not in ref_row, True)
 
 print("\nthe referee never appears on this board, staffed or not")
 # That lives on the referee board and nowhere else - a manager should see the

@@ -94,15 +94,13 @@ def _roster_line(roster):
 # down to fit it - DOME next to UEFA, DOM next to UCL/UEL.
 MIN_TAG_WIDTH = 3
 
-# How a kickoff reads on the referee board and game details. "f" is "18 September 2026 17:30"; the
-# weekday is left off because each row sits under a "Friday 18 September"
-# heading, and the shorter time keeps a row with two referees on one line
-# instead of wrapping the second name onto its own.
-ROW_TIME_STYLE = "f"
-
-# The public fixture board has room for the full "Friday, 18 September 2026
-# 17:30", since its rows carry no referee names.
+# How a kickoff reads. The public fixture board and the game details show the
+# full "Friday, 18 September 2026 17:30". The referee board shows only the
+# time ("17:30"): every row sits under its day heading, and the short form
+# keeps a row with two referees on one line. All of them are Discord
+# timestamps, so each person sees their own timezone.
 BOARD_TIME_STYLE = "F"
+REFEREE_TIME_STYLE = "t"
 
 
 def tag_width(leagues):
@@ -130,7 +128,7 @@ def referee_board_row(fixture, slot, week, roster=(), tag_letters=MIN_TAG_WIDTH)
     """
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
-    when = discord_time(slot_datetime(week, slot), ROW_TIME_STYLE)
+    when = discord_time(slot_datetime(week, slot), REFEREE_TIME_STYLE)
     tag = league_tag(fixture.get("league"), tag_letters)
     who = " ".join("<@{}>".format(r["referee_id"]) for r in roster) if roster else "_open_"
     return "{}{} *vs* {} @ {} {}".format(tag, home, away, when, who)
@@ -572,7 +570,7 @@ def fixture_detail(fixture, history, slot=None, roster=()):
         description="{}\n**{}** vs **{}**".format(
             _game(fixture), fixture["home_team"], fixture["away_team"]),
     )
-    kickoff = (discord_time(slot_datetime(fixture["week"], slot), ROW_TIME_STYLE)
+    kickoff = (discord_time(slot_datetime(fixture["week"], slot), BOARD_TIME_STYLE)
                if slot else "Not set yet")
     embed.fields += [
         ("Status", STATUS_LABEL.get(fixture["status"], fixture["status"]), True),
