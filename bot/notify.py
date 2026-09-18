@@ -137,7 +137,7 @@ def referee_board_row(fixture, slot, week, roster=(), tag_letters=MIN_TAG_WIDTH)
 def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
                   competition=None):
     """The public, self-updating referee board: every day that has a kickoff
-    time yet, as many days per embed as fit, all sent in one message.
+    time yet, one embed per day, all sent in one message.
 
     A fixture still marked TBD is left off entirely - there's nothing to claim
     until it has a time. The claim prompt is a separate embed below this one
@@ -189,19 +189,9 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
                 fixture, slot, week, rosters.get(fixture["id"]), letters))
         blocks.append(block)
 
-    # Whole days are packed into one embed for as long as they fit under the
-    # limit, then the next embed starts on a day boundary - never mid-day
-    # unless a single day is itself bigger than the limit.
-    chunks, current = [], []
+    chunks = []
     for block in blocks:
-        candidate = current + [""] + block if current else list(block)
-        if current and len(chr(10).join(candidate)) > REFEREE_EMBED_CHUNK:
-            chunks.extend(_chunk_description(current, REFEREE_EMBED_CHUNK))
-            current = list(block)
-        else:
-            current = candidate
-    if current:
-        chunks.extend(_chunk_description(current, REFEREE_EMBED_CHUNK))
+        chunks.extend(_chunk_description(block, REFEREE_EMBED_CHUNK))
     embeds = [BoardEmbed(title=title if i == 0 else None, description=d)
              for i, d in enumerate(chunks)]
     embeds[-1].footer = footer_text
@@ -405,10 +395,9 @@ def _chunk_description(lines, limit=None):
 # description up to 4096 characters, but the client was observed silently
 # not displaying the tail of a ~4000-character one (the board's Sunday
 # section went missing on screen while the API held it in full) - so the
-# referee board packs as many whole days as fit under this into one embed,
-# and starts another when they do not. If a day's tail ever goes missing on
-# screen again, lower this. A day is only split further if it alone is bigger.
-REFEREE_EMBED_CHUNK = 3500
+# referee board gets one embed per day instead of one long one. A day is
+# only ever split further if it alone is bigger than this.
+REFEREE_EMBED_CHUNK = 2500
 
 
 # Discord's cap on the *combined* size of every embed attached to one
