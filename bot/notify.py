@@ -356,7 +356,7 @@ def availability_call_to_action(gameweek, deadline):
 # spaces to break at, so it runs to the embed's maximum width and stretches
 # every embed to match. If embeds still look short, raise EMBED_PAD; if the
 # blanks add extra empty lines on your screen, lower it.
-EMBED_PAD = 80
+EMBED_PAD = 76
 BLANK = "⠀"
 
 
