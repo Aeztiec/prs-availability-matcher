@@ -27,7 +27,6 @@ STAT_EMOJI = {
     "yellow": "🟨",
     "red": "🟥",
     "sub": "🔁",       # shown as "🔁 '75 ON" / "🔁 '75 OFF"; see parse_line
-    "nosub": "🚫",      # unused player
     "pen_scored": "🟢",
     "pen_missed": "🔴",
 }
@@ -37,12 +36,11 @@ TOKENS = {
     "a": "assist", "ast": "assist", "assist": "assist", "assists": "assist",
     "yc": "yellow", "yellow": "yellow",
     "rc": "red", "red": "red",
-    "nosub": "nosub", "unused": "nosub",
     "ps": "pen_scored", "pm": "pen_missed",
 }
 
 TOKEN_HELP = ("g goal, a assist, yc yellow, rc red, on75 / off75 subbed on or off at "
-              "75', nosub unused, ps scored pen, pm missed pen (g3 = three goals)")
+              "75', ps scored pen, pm missed pen (g3 = three goals)")
 SUB_HELP = ("A sub needs the minute and ON or OFF, like on75 or off60 "
             "(added time works too: on90+3).")
 

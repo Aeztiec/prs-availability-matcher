@@ -1360,10 +1360,11 @@ def register(bot):
         "- `yc` yellow, `rc` red",
         "- `on75` / `off75` sub on / off (minute required)",
         "- `ps` / `pm` shootout penalty scored / missed",
-        "- `nosub` unused, `g3` three goals",
+        "- `g3` three goals",
         "",
         "**Lineups:** pre-filled. Reorder to match who started, keep substitutes "
         "under `BENCH`, and remove anyone who did not play.",
+        "",
         "**MOTM:** best first (🏆 🥇 🥈 🥉). Optional note after a dash.",
     ])
 
