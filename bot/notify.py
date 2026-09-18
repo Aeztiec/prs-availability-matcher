@@ -42,7 +42,8 @@ def _game(fixture):
                              season.label_for(fixture["away_team"]))
 
 
-LEGEND_LINE = "**How to mark each time slot:** ⚪ No · 🟡 Fine · 🟢 Ideal"
+LEGEND_LINE = ("**How to mark each time slot:**" + chr(10) + "⚪ No" + chr(10)
+               + "🟡 Fine" + chr(10) + "🟢 Ideal")
 
 
 def ask_for_availability(fixture, deadline_iso):
@@ -353,11 +354,11 @@ def availability_call_to_action(gameweek, deadline):
             "Use the button below to submit the times **{}** works for "
             "your team. The selector opens privately, so only you can see "
             "your responses.\n\n"
-            "**How to mark each time slot:** ⚪ No · 🟡 Fine · 🟢 Ideal\n\n"
+            "{legend}\n\n"
             "Once both managers have responded, the best mutually available "
             "time is selected automatically and the fixture list above "
             "updates."
-        ).format(gameweek.label),
+        ).format(gameweek.label, legend=LEGEND_LINE),
         fields=[
             ("Deadline", discord_time(deadline, "F"), False),
         ],

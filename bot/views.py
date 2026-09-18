@@ -120,7 +120,8 @@ class Target:
 # rendering
 # --------------------------------------------------------------------------
 
-LEGEND = "⚪ no  ·  🟡 fine  ·  🟢 ideal (click a time to cycle it)"
+LEGEND = chr(10).join(["**How to mark each time slot:**", "⚪ No", "🟡 Fine", "🟢 Ideal"])
+CYCLE_HINT = "Click a time to cycle it."
 
 
 def _discord_embed(board_embed):
@@ -149,8 +150,8 @@ def build_message(store, target, user_id, state, active_day=None):
     """The embed shown above the buttons - one field per day, so the current
     picks read as a compact row of cards rather than a wall of plain text."""
     active_day = _resolve_active_day(state, active_day)
-    description = "{}\n\nAll times are **GMT+0**. {}".format(
-        target.heading(store, user_id), LEGEND)
+    description = "{}\n\nAll times are **GMT+0**. {}\n\n{}".format(
+        target.heading(store, user_id), CYCLE_HINT, LEGEND)
     if state.submitted:
         description += "\n\n✅ Submitted. You can still change it until the deadline."
     embed = notify.BoardEmbed(
