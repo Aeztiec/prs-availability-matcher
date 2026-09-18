@@ -1353,24 +1353,20 @@ def register(bot):
     STARTERS = 7
 
     RESULT_GUIDE = chr(10).join([
-        "### How to fill this in",
-        "One player per line, then the codes after their name.",
-        "Example: `vzcadc g g a` is two goals and an assist.",
+        "### Result form",
+        "One player per line, with codes after the name: `vzcadc g g a`.",
         "",
         "**Codes**",
-        "- `g` goal",
-        "- `a` assist",
-        "- `yc` yellow card",
-        "- `rc` red card",
-        "- `on75` or `off75` subbed on or off at 75' (the minute is required)",
+        "- `g` goal, `a` assist",
+        "- `yc` yellow, `rc` red",
+        "- `on75` / `off75` subbed on / off at 75' (minute required)",
         "- `nosub` unused player",
-        "- `ps` scored shootout penalty",
-        "- `pm` missed shootout penalty",
-        "- `g3` three goals (repeat any code like this)",
+        "- `ps` / `pm` shootout penalty scored / missed",
+        "- `g3` three goals",
         "",
-        "**Bench:** everyone under the `BENCH` line is a substitute.",
-        "**MOTM & mentions:** best first. They get 🏆, then 🥇 🥈 🥉. "
-        "Add a note after a dash: `username - note`.",
+        "**Lineups** are pre-filled. Reorder them to match who started and who "
+        "came on, keeping substitutes under `BENCH`, and remove anyone who did not play.",
+        "**MOTM:** best first (🏆 🥇 🥈 🥉). Add a note after a dash.",
     ])
 
     def starting_lines(club):
