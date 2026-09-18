@@ -408,12 +408,16 @@ def availability_call_to_action(gameweek, deadline):
     )
 
 
-# Embed descriptions allow up to 4096 characters each - far more headroom
-# than a plain message ever had, so in practice a gameweek's fixture list
-# always fits in one embed. The budget stays comfortably under that ceiling
-# so a freak division (badges failing to resolve and falling back to full
-# team names, say) still has somewhere to spill into instead of erroring.
-DESCRIPTION_CHUNK = 3800
+# Embed descriptions allow up to 4096 characters each. A full 40-fixture
+# gameweek (20 domestic plus 20 UEFA) runs to about 4020 characters on the
+# referee board, the most text-heavy of the two boards - so the budget sits
+# just under the real ceiling rather than the far more conservative margin
+# this used to have, which was splitting a normal gameweek into two embeds
+# for no reason. _chunk_description() never lets a finished chunk exceed
+# this figure, so the gap to 4096 is what's left for genuine overflow (a
+# division's badges failing to resolve and falling back to full team
+# names, say) before it has to spill into a second embed.
+DESCRIPTION_CHUNK = 4050
 
 
 def _chunk_description(lines):
