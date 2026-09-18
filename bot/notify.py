@@ -165,7 +165,7 @@ def referee_board_row(fixture, slot, week, roster=()):
     when = discord_time(slot_datetime(week, slot), "F")
     tag = league_tag(fixture.get("league"))
     who = " ".join("<@{}>".format(r["referee_id"]) for r in roster) if roster else "_open_"
-    return "{}{} *vs* {} @ {}  ·  {}".format(tag, home, away, when, who)
+    return "{}{} *vs* {} @ {} {}".format(tag, home, away, when, who)
 
 
 def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
