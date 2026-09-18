@@ -90,8 +90,9 @@ class Target:
 
     def heading(self, store, user_id):
         def row(f):
-            return "{} vs {}".format(
-                season.label_for(f["home_team"]), season.label_for(f["away_team"]))
+            tag = notify.league_tag(f.get("league"))
+            return "{}{} vs {}".format(
+                tag, season.label_for(f["home_team"]), season.label_for(f["away_team"]))
 
         fixtures = self._my_fixtures(store, user_id)
         if not fixtures:

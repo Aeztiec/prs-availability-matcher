@@ -131,13 +131,14 @@ def _roster_line(roster):
 LEAGUE_TAG_WIDTH = len("DOMESTIC")
 
 
-def _league_tag(league):
+def league_tag(league):
     """(DOMESTIC) or (UEFA), same width either way.
 
     Discord doesn't render ordinary text in monospace, so two labels of
     different lengths would push each row's badges to a different starting
     point. Padding the word to a fixed width inside a backtick span keeps
-    every row lined up regardless of which one it is.
+    every row lined up regardless of which one it is. Shared across the
+    referee board and the availability selector, not just the one place.
     """
     if not league:
         return ""
@@ -155,7 +156,7 @@ def referee_board_row(fixture, slot, week, roster=()):
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
     when = discord_time(slot_datetime(week, slot), "F")
-    tag = _league_tag(fixture.get("league"))
+    tag = league_tag(fixture.get("league"))
     who = " ".join("<@{}>".format(r["referee_id"]) for r in roster) if roster else "_open_"
     return "{}{} *vs* {} @ {}  ·  {}".format(tag, home, away, when, who)
 
