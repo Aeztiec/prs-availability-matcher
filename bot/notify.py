@@ -128,11 +128,11 @@ def _roster_line(roster):
     )
 
 
-LEAGUE_TAG_WIDTH = len("DOMESTIC")
+LEAGUE_TAG_WIDTH = len("UEFA")
 
 
 def league_tag(league):
-    """(DOMESTIC) or (UEFA), same width either way.
+    """(DOM) or (UEFA), same width either way.
 
     Discord doesn't render ordinary text in monospace, so two labels of
     different lengths would push each row's badges to a different starting
@@ -142,7 +142,7 @@ def league_tag(league):
     """
     if not league:
         return ""
-    label = "DOMESTIC" if league in season.LEAGUES else "UEFA"
+    label = "DOM" if league in season.LEAGUES else "UEFA"
     return "`({})` ".format(label.center(LEAGUE_TAG_WIDTH))
 
 

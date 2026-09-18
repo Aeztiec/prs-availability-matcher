@@ -219,7 +219,7 @@ check("a single-fixture manager gets the plain vs heading, no bold header",
 check("only their fixtures are listed, not the other manager's",
       "DEF FC" in WEEK_TARGET.heading(multi_store, 222), False)
 
-print("\neach row carries a DOMESTIC/UEFA tag, same as the referee board")
+print("\neach row carries a DOM/UEFA tag, same as the referee board")
 tagged_store = FakeStore(fixtures=[
     {"id": 1024, "home_team": "ABC FC", "away_team": "XYZ FC", "league": "PL",
      "home_manager_id": 111, "away_manager_id": 222,
@@ -229,10 +229,10 @@ tagged_store = FakeStore(fixtures=[
      "slot_key": None, "gameweek": None, "week": WEEK},
 ])
 tagged_heading = WEEK_TARGET.heading(tagged_store, 111)
-check("a domestic league gets tagged DOMESTIC",
-      "`(DOMESTIC)` ABC FC vs XYZ FC" in tagged_heading, True)
+check("a domestic league gets tagged DOM",
+      "`(DOM )` ABC FC vs XYZ FC" in tagged_heading, True)
 check("anything outside season.LEAGUES gets tagged UEFA",
-      "`(  UEFA  )` DEF FC vs GHI FC" in tagged_heading, True)
+      "`(UEFA)` DEF FC vs GHI FC" in tagged_heading, True)
 check("a fixture with no league at all gets no tag",
       WEEK_TARGET.heading(multi_store, 111).startswith(
           "**__Your fixtures:__** 📋\nABC FC vs XYZ FC"), True)
