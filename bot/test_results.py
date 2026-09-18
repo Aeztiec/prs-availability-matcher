@@ -97,9 +97,14 @@ check("team 2 is its own block with no bench when there is none",
       text.split("\n\n")[3].splitlines()[0], "{} | FelipeF".format(PSG))
 check("underscore usernames are escaped, not italic", "\\_gawa" in text, True)
 check("red card shown", "om\\_ena 🟥" in text, True)
-check("mentions: team badge, name, optional note",
+check("mentions: badge, name, trophy then medals, optional note",
       rows_of(text, "**MOTM & MENTIONS:**"),
-      ["{} | \\_gawa - hat trick".format(PORTO), "{} | FelipeF".format(PSG)])
+      ["{} | \\_gawa 🏆 - hat trick".format(PORTO), "{} | FelipeF 🥇".format(PSG)])
+five = build(FIXTURE, 1, 0, "", "",
+             "_gawa\nvzcadc\nFelipeF\nom_ena\ndanielfly", "", SHEET)[0]
+check("only the first four get the trophy and medals",
+      [r.split(" | ")[1].split(" ")[-1] for r in rows_of(five, "**MOTM & MENTIONS:**")],
+      ["🏆", "🥇", "🥈", "🥉", "danielfly"])
 check("officiating team keeps role and minutes",
       rows_of(text, "**OFFICIATING TEAM:**")[0].endswith("moh1d - Main Referee [Full 90']"), True)
 check("nobody is pinged", "<@" in text, False)

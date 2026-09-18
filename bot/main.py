@@ -819,12 +819,14 @@ def register(bot):
     @app_commands.describe(
         active="False deactivates them instead of registering",
         tier="Their referee tier (new referees start at 1)",
+        roblox="Their Roblox username, shown in results",
     )
     @staff_only()
     async def refs_register(interaction, user: discord.User, active: bool = True,
-                            tier: app_commands.Range[int, 1, MAX_TIER] = None):
+                            tier: app_commands.Range[int, 1, MAX_TIER] = None,
+                            roblox: str = None):
         if active:
-            store.add_referee(user.id, user.display_name, tier)
+            store.add_referee(user.id, user.display_name, tier, roblox)
             current = next(r["tier"] for r in store.referees() if r["discord_id"] == user.id)
             await interaction.response.send_message(
                 "{} registered as a referee (Tier {}).".format(user.mention, current),
@@ -1387,7 +1389,17 @@ def register(bot):
             self.away = box("{} stats".format(fixture["away_team"].title()),
                             starting_lines(fixture["away_team"]), "username g g a")
             self.motm = box("MOTM & mentions", placeholder="username - short note (optional)")
-            names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
+            def roblox_name(row):
+                """The Roblox username staff registered them with, else their
+                Discord name if it matches someone on the sheet, else the
+                Discord name as is."""
+                if row.get("roblox"):
+                    return row["roblox"]
+                match = players.find(row["name"])
+                return match["username"] if match else row["name"]
+
+            names = {r["discord_id"]: roblox_name(r)
+                     for r in store.referees(active_only=False)}
             crew = [names[r["referee_id"]] + " - " + OFFICIAL_ROLE[r["role"]] + " [Full 90']"
                     for r in store.fixture_referees(fixture["id"])
                     if r["referee_id"] in names]

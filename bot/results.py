@@ -45,6 +45,8 @@ TOKENS = {
 TOKEN_HELP = ("g goal, a assist, yc yellow, rc red, sub subbed on/off, nosub unused, "
               "ps scored pen, pm missed pen (g3 = three goals)")
 
+# MOTM gets the trophy, the next three mentions the medals, in the order typed.
+PLACINGS = ["🏆", "🥇", "🥈", "🥉"]
 MAX_MENTIONS = 10
 DESCRIPTION_LIMIT = 4000   # an embed description holds 4096
 
@@ -172,14 +174,15 @@ def build(fixture, home_score, away_score, stats_home, stats_away, motm,
     mentions = lines_of(motm)
     if len(mentions) > MAX_MENTIONS:
         problems.append("MOTM & mentions takes at most {} names.".format(MAX_MENTIONS))
-    for line in mentions[:MAX_MENTIONS]:
+    for place, line in enumerate(mentions[:MAX_MENTIONS]):
         who, _, note = line.partition(" - ")
         record = check(who.split()[0].lstrip("@") if who.split() else "")
         if record and record["club"] not in (home, away):
             problems.append("**{}** doesn't play for {} or {}.".format(
                 record["username"], home.title(), away.title()))
         elif record:
-            motm_rows.append(_row(record["club"], esc(record["username"])
+            medal = " " + PLACINGS[place] if place < len(PLACINGS) else ""
+            motm_rows.append(_row(record["club"], esc(record["username"]) + medal
                                   + (" - " + esc(note.strip()) if note.strip() else "")))
 
     if problems:
