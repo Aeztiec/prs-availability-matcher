@@ -18,7 +18,7 @@ from . import season
 from .referees import MAX_ASSISTANTS, ROLE_AR, ROLE_REF
 from .scheduling import Source
 
-from .weeks import discord_time, format_uk, from_iso, slot_datetime, week_saturday
+from .weeks import discord_time, from_iso, slot_datetime, week_saturday
 
 FOOTER = "-# Times show in your own timezone."
 
@@ -360,8 +360,8 @@ def fixture_board(fixtures, week, slot_for,
 
     if deadline is not None:
         embeds[-1].fields = [
-            ("Scheduling Deadline", format_uk(deadline), True),
-            ("Scheduling Extension", format_uk(deadline + timedelta(days=7)), True),
+            ("Scheduling Deadline", discord_time(deadline, "F"), True),
+            ("Scheduling Extension", discord_time(deadline + timedelta(days=7), "F"), True),
         ]
     embeds[-1].footer = (
         "Not agreed by then and Officials set the time from your submitted "
@@ -373,33 +373,33 @@ def fixture_board(fixtures, week, slot_for,
 
 
 def availability_call_to_action(gameweek, deadline):
-    """The message posted under the announcement, with the button on it.
+    """The board posted under the announcement, with the button on it.
+
+    Its own embed, and its own message - a button is attached to the message,
+    not the embed, and keeping it separate from the announcement means that
+    board can keep being edited in place without Discord ever touching this
+    one or dropping its component.
 
     Public and button-driven on purpose. A DM only reaches managers who allow
     them; a button in a channel reaches everyone, and each person who clicks it
-    gets their own private selector. The formatting matches the announcement
-    above it: a bold underlined heading and a bold all-caps label for the
-    deadline, rather than reading like a separate, casually written message.
+    gets their own private selector.
     """
-    return "\n".join([
-        "**__Managers, submit your timings:__**",
-        "",
-        "Use the button below to enter the times **{}** works for your "
-        "team. The selector opens privately, so only you can see your "
-        "responses.".format(gameweek.label),
-        "",
-        "Mark each time as **🟢 ideal**, **🟡 fine**, or leave it **⚪ no** "
-        "if you are not available. Once both managers have responded, the "
-        "best mutually available time is selected automatically and the "
-        "fixture list above is updated.",
-        "",
-        "**DEADLINE:**",
-        discord_time(deadline, "F"),
-        "",
-        "-# If you have nothing to submit, your gameweek may not be open "
-        "yet, or you are not registered as a manager. Contact an Official "
-        "if you believe this is incorrect.",
-    ])
+    return BoardEmbed(
+        title="Managers, submit your timings",
+        description=(
+            "Use the button below to enter the times **{}** works for your "
+            "team. The selector opens privately, so only you can see your "
+            "responses.\n\n"
+            "Mark each time as **🟢 ideal**, **🟡 fine**, or leave it **⚪ no** "
+            "if you are not available. Once both managers have responded, "
+            "the best mutually available time is selected automatically and "
+            "the fixture list above is updated."
+        ).format(gameweek.label),
+        fields=[("Deadline", discord_time(deadline, "F"), False)],
+        footer=("If you have nothing to submit, your gameweek may not be "
+                "open yet, or you are not registered as a manager. Contact "
+                "an Official if you believe this is incorrect."),
+    )
 
 
 # Embed descriptions allow up to 4096 characters each - far more headroom

@@ -463,7 +463,7 @@ class PRSBot(discord.Client):
             gw = next((g for g in season.ALL if g.week == week), None)
             if gw:
                 await channel.send(
-                    notify.availability_call_to_action(gw, gw.deadline),
+                    embed=_discord_embed(notify.availability_call_to_action(gw, gw.deadline)),
                     view=availability_button(),
                 )
         return message

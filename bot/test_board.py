@@ -261,13 +261,17 @@ print("\nthe public call to action, for managers whose DMs are closed")
 from bot.notify import availability_call_to_action
 
 cta = availability_call_to_action(gw1, gw1.deadline)
-check("names the gameweek", "Gameweek 1" in cta, True)
-check("says it opens privately", "privately" in cta, True)
+check("its own embed, titled for the managers",
+      cta.title, "Managers, submit your timings")
+check("names the gameweek", "Gameweek 1" in cta.description, True)
+check("says it opens privately", "privately" in cta.description, True)
 check("explains the three states",
-      all(w in cta for w in ("ideal", "fine", "no")), True)
-check("states the deadline", "<t:" in cta, True)
-check("tells a non-manager what to do", "Contact an Official" in cta, True)
-check("fits Discord's limit", len(cta) <= DISCORD_LIMIT, True)
+      all(w in cta.description for w in ("ideal", "fine", "no")), True)
+check("the deadline is its own field", cta.fields[0][0], "Deadline")
+check("stated as a localised timestamp", "<t:" in cta.fields[0][1], True)
+check("tells a non-manager what to do, in the footer",
+      "Contact an Official" in cta.footer, True)
+check("fits an embed's limit", len(cta.description) <= EMBED_DESC_LIMIT, True)
 
 print("\nthe board tracks every message it occupies")
 store = fresh_store()
