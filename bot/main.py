@@ -723,7 +723,9 @@ def register(bot):
         fixture number. Typing filters by team code or full team name."""
         async def complete(interaction, current: str):
             try:
-                return await find(current)
+                choices = await find(current)
+                log.info("game autocomplete for %r: %d choices", current, len(choices))
+                return choices
             except Exception:
                 log.exception("game autocomplete failed")
                 return []
