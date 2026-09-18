@@ -415,20 +415,23 @@ def availability_call_to_action(gameweek, deadline):
     )
 
 
-# Embed descriptions allow up to 4096 characters each. A full 40-fixture
-# gameweek (20 domestic plus 20 UEFA) runs to about 4020 characters on the
-# referee board, the most text-heavy of the two boards - so the budget sits
-# just under the real ceiling rather than the far more conservative margin
-# this used to have, which was splitting a normal gameweek into two embeds
-# for no reason. _chunk_description() never lets a finished chunk exceed
-# this figure, so the gap to 4096 is what's left for genuine overflow (a
-# division's badges failing to resolve and falling back to full team
-# names, say) before it has to spill into a second embed.
-DESCRIPTION_CHUNK = 4050
+# Discord's own hard cap on one embed's description. Set to the real
+# number rather than a conservative margin below it: _chunk_description()
+# always finishes a chunk at least one character short of this figure
+# (see its docstring), so a chunk can never actually reach 4096 - there is
+# no scenario where sitting further below it buys any extra safety, only
+# an earlier, needless split into a second embed.
+DESCRIPTION_CHUNK = 4096
 
 
 def _chunk_description(lines):
-    """Split rendered lines into embed-description-sized pieces, never mid-row."""
+    """Split rendered lines into embed-description-sized pieces, never mid-row.
+
+    Each finished chunk's actual length is DESCRIPTION_CHUNK minus one at
+    most: `length` tracks every line plus a trailing separator that the
+    last line never actually gets once joined, so the real string is
+    always one character shorter than the budget it was closed under.
+    """
     chunks = []
     current = []
     length = 0
