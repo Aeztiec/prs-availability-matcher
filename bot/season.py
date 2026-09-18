@@ -31,7 +31,7 @@ SEASON_LABEL = "SEASON 17"
 
 # The league's brand colour, used on every embed the bot sends - one place to
 # change it rather than a hex code copied into each call site.
-EMBED_COLOR = 0x0E1328
+EMBED_COLOR = 0xFF13F0
 
 # Optional emoji after the heading and after each division name, the way the
 # league's own posts do it. Upload one named after the league code below (PL,
