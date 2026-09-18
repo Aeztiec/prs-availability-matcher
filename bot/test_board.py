@@ -362,8 +362,8 @@ finally:
     _season.SEASON_EMOJI = real_season
 
 print("\nthe league tag says DOM or UEFA",)
-check("a domestic fixture is tagged DOM", league_tag("PL"), "`( DOM )` ")
-check("a UEFA fixture is tagged UEFA", league_tag("UEFA"), "`(UEFA )` ")
+check("a domestic fixture is tagged DOM", league_tag("PL"), "`(DOM )` ")
+check("a UEFA fixture is tagged UEFA", league_tag("UEFA"), "`(UEFA)` ")
 check("no league at all is just blank", league_tag(None), "")
 check("the two tags are the same width, so they line up",
       len(league_tag("PL")), len(league_tag("UEFA")))

@@ -132,12 +132,12 @@ def _roster_line(roster):
 # place on every row. That only works because they sit inside a code span:
 # Discord draws those in a monospace font, so equal character counts really do
 # mean equal widths - ordinary text is proportional and would drift.
-DOMESTIC_TAG = "( DOM )"
-UEFA_TAG = "(UEFA )"
+DOMESTIC_TAG = "(DOM )"
+UEFA_TAG = "(UEFA)"
 
 
 def league_tag(league):
-    """`( DOM )` or `(UEFA )` - which competition a fixture is in."""
+    """`(DOM )` or `(UEFA)` - which competition a fixture is in."""
     if not league:
         return ""
     return "`{}` ".format(DOMESTIC_TAG if league in season.LEAGUES else UEFA_TAG)
