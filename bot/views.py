@@ -17,7 +17,6 @@ import re
 
 import discord
 
-from . import notify
 from .selector import SelectorState, describe_choice
 
 # --------------------------------------------------------------------------
@@ -27,15 +26,17 @@ from .selector import SelectorState, describe_choice
 # deliberately NOT encoded - it is read from the interaction, so one person
 # cannot act on another's selector by replaying a custom_id.
 #
-#   av:fx:1024:sat_1800      slot button, manager on fixture 1024
-#   avd:fx:1024:1            switch to day index 1
-#   avs:fx:1024              submit
-#   avc:fx:1024              clear
+#   av:fx:2026-09-19:sat_1800   slot button, manager's week of 2026-09-19
+#   avd:fx:2026-09-19:1         switch to day index 1
+#   avs:fx:2026-09-19           submit
+#   avc:fx:2026-09-19           clear
 #
-# The "fx" scope segment is a holdover from when referees answered a weekly
-# selector through this same machinery (scope "rw"). That path is gone -
-# referees now claim games directly, see ref_views.py - but the segment stays
-# in the id format so buttons already posted before this change keep routing.
+# "ref" is a week key, not a fixture id - a manager answers once for every
+# fixture they have that week, see Target below. The "fx" scope segment is a
+# holdover from when referees also answered a weekly selector through this
+# same machinery (scope "rw"). That path is gone - referees now claim games
+# directly, see ref_views.py - but the segment stays in the id format so
+# buttons already posted before this change keep routing.
 # --------------------------------------------------------------------------
 
 SCOPE_FIXTURE = "fx"
@@ -44,52 +45,65 @@ _REF = r"[\w.-]+"
 
 
 class Target:
-    """A manager's fixture: where a selector's answers are stored."""
+    """A manager's week: where a selector's answers are stored.
+
+    One submission covers every fixture the manager has that week, not just
+    one - someone managing more than one team marks their times once and it
+    applies to all of them, instead of repeating the same picks per fixture.
+    """
 
     def __init__(self, scope, ref):
         self.scope = scope
-        self.ref = str(ref)
+        self.ref = str(ref)   # the week key, e.g. "2026-09-19"
+
+    def _my_fixtures(self, store, user_id, open_only=True):
+        return [
+            f for f in store.fixtures(week=self.ref)
+            if user_id in (f["home_manager_id"], f["away_manager_id"])
+            and (not open_only or not f["slot_key"])
+        ]
 
     def load(self, store, user_id):
-        record = store.submission(int(self.ref), user_id)
+        record = store.weekly_submission(self.ref, user_id)
         if not record:
             return {}, False
         return record["slots"], bool(record["submitted"])
 
     def save(self, store, user_id, picks, submitted=False):
-        store.save_submission(int(self.ref), user_id, picks, submitted=submitted)
+        store.save_weekly_submission(self.ref, user_id, picks, submitted=submitted)
 
     def mark_submitted(self, store, user_id):
-        store.mark_submitted(int(self.ref), user_id)
+        fixture_ids = [f["id"] for f in self._my_fixtures(store, user_id)]
+        store.mark_weekly_submitted(self.ref, user_id, fixture_ids)
 
     def may_answer(self, store, user_id):
-        """Only the two managers of the fixture."""
-        fixture = store.fixture(int(self.ref))
-        if not fixture:
-            return False
-        return user_id in (fixture["home_manager_id"], fixture["away_manager_id"])
+        """Only someone managing at least one fixture this week."""
+        return bool(self._my_fixtures(store, user_id, open_only=False))
 
-    def heading(self, store):
-        fixture = store.fixture(int(self.ref))
-        if not fixture:
-            return "Fixture not found"
-        return "#{} · {} vs {}".format(
-            fixture["id"], fixture["home_team"], fixture["away_team"]
+    def heading(self, store, user_id):
+        fixtures = self._my_fixtures(store, user_id)
+        if not fixtures:
+            return "No fixtures"
+        if len(fixtures) == 1:
+            f = fixtures[0]
+            return "#{} · {} vs {}".format(f["id"], f["home_team"], f["away_team"])
+        return "Your fixtures: " + ", ".join(
+            "#{} {} vs {}".format(f["id"], f["home_team"], f["away_team"])
+            for f in fixtures
         )
 
-    def closed(self, store):
+    def closed(self, store, user_id):
         """Why answering is no longer possible, or None."""
-        fixture = store.fixture(int(self.ref))
-        if not fixture:
-            return "That fixture no longer exists."
-        if fixture["slot_key"]:
-            return "This fixture is already scheduled for {}.".format(fixture["slot_key"])
+        if not self._my_fixtures(store, user_id, open_only=False):
+            return "You have no fixtures this week."
+        if not self._my_fixtures(store, user_id):
+            return "All of your fixtures this week are already scheduled."
         return None
 
     def gameweek(self, store):
-        """The fixture's gameweek key, for working out which slots are legal."""
-        fixture = store.fixture(int(self.ref))
-        return fixture["gameweek"] if fixture else None
+        """This week's gameweek key, for working out which slots are legal."""
+        fixtures = store.fixtures(week=self.ref)
+        return next((f["gameweek"] for f in fixtures if f["gameweek"]), None)
 
 
 # --------------------------------------------------------------------------
@@ -99,12 +113,16 @@ class Target:
 LEGEND = "⚪ no  ·  🟡 fine  ·  🟢 ideal (click a time to cycle it)"
 
 
-def build_message(store, target, state, active_day=None):
-    """The text shown above the buttons."""
+def _resolve_active_day(state, active_day):
     days = state.days
-    active_day = active_day if active_day in days else (days[0] if days else None)
+    return active_day if active_day in days else (days[0] if days else None)
+
+
+def build_message(store, target, user_id, state, active_day=None):
+    """The text shown above the buttons."""
+    active_day = _resolve_active_day(state, active_day)
     lines = [
-        "**{}**".format(target.heading(store)),
+        "**{}**".format(target.heading(store, user_id)),
         "",
         "All times are **GMT+0**. {}".format(LEGEND),
         "",
@@ -115,9 +133,9 @@ def build_message(store, target, state, active_day=None):
     return "\n".join(lines), active_day
 
 
-def build_view(store, target, state, active_day=None):
+def build_view(target, state, active_day=None):
     """A fresh View for the current state. Rebuilt on every click."""
-    _, active_day = build_message(store, target, state, active_day)
+    active_day = _resolve_active_day(state, active_day)
     view = discord.ui.View(timeout=None)
 
     days = state.days
@@ -140,8 +158,8 @@ def build_view(store, target, state, active_day=None):
 
 
 async def refresh(interaction, store, target, state, active_day=None):
-    content, active_day = build_message(store, target, state, active_day)
-    view, _ = build_view(store, target, state, active_day)
+    content, active_day = build_message(store, target, interaction.user.id, state, active_day)
+    view, _ = build_view(target, state, active_day)
     await interaction.response.edit_message(content=content, view=view)
 
 
@@ -149,8 +167,8 @@ async def open_selector(interaction, store, target, slots, ephemeral=True):
     """First render, in response to a command or a DM button."""
     saved, submitted = target.load(store, interaction.user.id)
     state = SelectorState(slots, saved=saved, submitted=submitted)
-    content, active_day = build_message(store, target, state)
-    view, _ = build_view(store, target, state, active_day)
+    content, active_day = build_message(store, target, interaction.user.id, state)
+    view, _ = build_view(target, state, active_day)
     await interaction.response.send_message(content=content, view=view, ephemeral=ephemeral)
 
 
@@ -177,7 +195,7 @@ class _SelectorButton:
                 "This selector isn't yours to fill in.", ephemeral=True
             )
             return False
-        reason = target.closed(store)
+        reason = target.closed(store, interaction.user.id)
         if reason:
             await interaction.response.send_message(reason, ephemeral=True)
             return False
@@ -306,11 +324,11 @@ class SubmitButton(
             ),
             ephemeral=True,
         )
-        # Target is always a fixture now - the referee weekly-selector scope
-        # this once had to be conditional on is gone (see the module docstring).
+        # Target is a manager's week now, covering every fixture of theirs in
+        # it - so the scheduling pass runs for the whole week, not one fixture.
         hook = getattr(interaction.client, "on_availability_submitted", None)
         if hook:
-            await hook(int(self.target.ref))
+            await hook(self.target.ref)
 
 
 class ClearButton(
@@ -419,9 +437,9 @@ class MyAvailabilityButton(
     async def callback(self, interaction):
         bot = interaction.client
         store = bot.store
-        mine = bot.my_open_fixtures(interaction.user.id)
+        week, fixtures = bot.my_open_week(interaction.user.id)
 
-        if not mine:
+        if not fixtures:
             managed = [t for t, uid in store.managers().items()
                        if uid == interaction.user.id]
             if not managed:
@@ -439,17 +457,10 @@ class MyAvailabilityButton(
             )
             return
 
-        if len(mine) > 1:
-            await interaction.response.send_message(
-                "You have more than one fixture open. Run the command under "
-                "the one you want to set:\n\n" + notify.fixture_picker(mine),
-                ephemeral=True,
-            )
-            return
-
-        fixture = mine[0]
-        await open_selector(interaction, store, Target(SCOPE_FIXTURE, fixture["id"]),
-                            bot.offerable_slots(fixture["gameweek"]))
+        # One selector for the whole week - it covers every fixture just
+        # found above, even if that's more than one team's game.
+        await open_selector(interaction, store, Target(SCOPE_FIXTURE, week),
+                            bot.offerable_slots(fixtures[0]["gameweek"]))
 
 
 def availability_button():

@@ -147,8 +147,8 @@ print("\nspec step 7: both managers respond")
 # --------------------------------------------------------------------------
 store = fresh_store()
 fid = new_fixture(store)
-store.save_submission(fid, 111, {"sat_1800": 2, "sun_1700": 1}, submitted=True)
-store.save_submission(fid, 222, {"sat_1800": 2, "sun_1700": 2}, submitted=True)
+store.save_weekly_submission(WEEK, 111, {"sat_1800": 2, "sun_1700": 1}, submitted=True)
+store.save_weekly_submission(WEEK, 222, {"sat_1800": 2, "sun_1700": 2}, submitted=True)
 
 outcome = advance(store, FakeTimings(), store.fixture(fid), now=BEFORE)
 check("scheduled", outcome.action, Action.SCHEDULED)
@@ -160,8 +160,8 @@ check("persisted", store.fixture(fid)["slot_key"], "sat_1800")
 print("\nlate submissions still beat the fallback")
 store = fresh_store()
 fid = new_fixture(store)
-store.save_submission(fid, 111, {"sat_1700": 2}, submitted=True)
-store.save_submission(fid, 222, {"sat_1700": 2}, submitted=True)
+store.save_weekly_submission(WEEK, 111, {"sat_1700": 2}, submitted=True)
+store.save_weekly_submission(WEEK, 222, {"sat_1700": 2}, submitted=True)
 late = advance(store, FakeTimings(), store.fixture(fid), now=AFTER)
 check("uses preferences even after the deadline", late.decision.source,
       Source.MANAGER_PREFERENCES)
@@ -170,11 +170,35 @@ check("not the fallback", late.decision.slot.key, "sat_1700")
 print("\nboth submitted but nothing overlaps -> staff")
 store = fresh_store()
 fid = new_fixture(store)
-store.save_submission(fid, 111, {"sat_1700": 2, "sat_1800": 0}, submitted=True)
-store.save_submission(fid, 222, {"sat_1700": 0, "sat_1800": 2}, submitted=True)
+store.save_weekly_submission(WEEK, 111, {"sat_1700": 2, "sat_1800": 0}, submitted=True)
+store.save_weekly_submission(WEEK, 222, {"sat_1700": 0, "sat_1800": 2}, submitted=True)
 clash = advance(store, FakeTimings(), store.fixture(fid), now=BEFORE)
 check("flagged", clash.action, Action.NO_VALID_TIME)
 check("status set", store.fixture(fid)["status"], Status.NEEDS_MANUAL_SCHEDULING)
+
+# --------------------------------------------------------------------------
+print("\none weekly submission covers every fixture a manager has that week")
+# --------------------------------------------------------------------------
+# 111 manages two teams this week - ABC (vs XYZ) and DEF (vs GHI). One
+# submission from them answers for both fixtures, same as if they'd
+# submitted twice under the old per-fixture model.
+store = fresh_store()
+shared = new_fixture(store, home="ABC FC", away="XYZ FC", home_id=111, away_id=222)
+second = new_fixture(store, home="DEF FC", away="GHI FC", home_id=111, away_id=333)
+store.save_weekly_submission(WEEK, 111, {"sat_1800": 2}, submitted=True)
+store.save_weekly_submission(WEEK, 222, {"sat_1800": 2}, submitted=True)
+store.save_weekly_submission(WEEK, 333, {"sat_1800": 2}, submitted=True)
+
+check("one submission stored, not two",
+      store.weekly_submission(WEEK, 111)["slots"], {"sat_1800": 2})
+first_outcome = advance(store, FakeTimings(), store.fixture(shared), now=BEFORE)
+second_outcome = advance(store, FakeTimings(), store.fixture(second), now=BEFORE)
+check("the shared manager's first fixture is scheduled from their one submission",
+      (first_outcome.action, first_outcome.decision.slot.key),
+      (Action.SCHEDULED, "sat_1800"))
+check("and so is their second, from that same submission - no second click needed",
+      (second_outcome.action, second_outcome.decision.slot.key),
+      (Action.SCHEDULED, "sat_1800"))
 
 # --------------------------------------------------------------------------
 print("\nspec step 8: only one manager responds")
@@ -183,7 +207,7 @@ sheet = {"ABC FC": {"sat_1700": True, "sat_1800": True, "sun_1700": False, "sun_
          "XYZ FC": {"sat_1700": False, "sat_1800": True, "sun_1700": True, "sun_1800": False}}
 store = fresh_store()
 fid = new_fixture(store)
-store.save_submission(fid, 111, {"sun_1800": 2}, submitted=True)   # only home replied
+store.save_weekly_submission(WEEK, 111, {"sun_1800": 2}, submitted=True)   # only home replied
 
 before = advance(store, FakeTimings(sheet), store.fixture(fid), now=BEFORE)
 check("before the deadline it waits", before.action, Action.WAIT)
@@ -232,8 +256,8 @@ WITH_EARLY = SLOTS + make_slots(("Saturday", 14 * 60))
 
 store = fresh_store()
 fid = new_fixture(store)
-store.save_submission(fid, 111, {"sat_1400": 2, "sat_1800": 1}, submitted=True)
-store.save_submission(fid, 222, {"sat_1400": 2, "sat_1800": 1}, submitted=True)
+store.save_weekly_submission(WEEK, 111, {"sat_1400": 2, "sat_1800": 1}, submitted=True)
+store.save_weekly_submission(WEEK, 222, {"sat_1400": 2, "sat_1800": 1}, submitted=True)
 prefs = advance(store, FakeTimings(slots=WITH_EARLY), store.fixture(fid), now=BEFORE)
 check("both managers marked 2pm ideal, but it's never picked",
       prefs.decision.slot.key != "sat_1400", True)

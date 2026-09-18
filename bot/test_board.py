@@ -17,10 +17,7 @@ import tempfile
 
 import bot.notify as notify_module
 from bot.db import Store
-from bot.notify import (
-    board_digest, board_row, dashboard_summary, fixture_board,
-    fixture_picker,
-)
+from bot.notify import board_digest, board_row, dashboard_summary, fixture_board
 from bot.orchestrator import dashboard
 from bot.scheduling import Source, Status
 from bot.slots import Slot, clean_day, slot_key
@@ -217,7 +214,7 @@ store.set_status(stuck, Status.NEEDS_MANUAL_SCHEDULING, "no overlapping availabi
 
 waiting = store.create_fixture("S17_Clubs", WEEK, "W1 FC", "W2 FC", 51, 52,
                                "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY)
-store.save_submission(waiting, 51, {"sat_1800": 2}, submitted=True)   # only home
+store.save_weekly_submission(WEEK, 51, {"sat_1800": 2}, submitted=True)   # only home
 
 buckets = dashboard(store, week=WEEK)
 waiting_on = {f["id"]: store.unsubmitted_managers(f["id"]) for f in store.fixtures(week=WEEK)}
@@ -399,78 +396,6 @@ check("a team without a badge falls back to its name",
       _season.label_for("NO SUCH TEAM"), "NO SUCH TEAM")
 check("a team with one shows only the badge",
       _season.label_for("ARSENAL"), _season.TEAM_EMOJI["ARSENAL"])
-
-# --------------------------------------------------------------------------
-print("\nthe fixture picker, shown when a manager has more than one game open")
-# --------------------------------------------------------------------------
-picker_store = fresh_store()
-picker_ids = []
-for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"][:6]):
-    fid = picker_store.create_fixture(
-        "S17_Clubs", WEEK, _season.team_name(h), _season.team_name(a),
-        900 + n, 901 + n, "2026-09-11T18:00:00Z",
-        Status.WAITING_FOR_AVAILABILITY, league=lg,
-    )
-    picker_ids.append(fid)
-
-picker = fixture_picker(picker_store.fixtures(week=WEEK))
-check("grouped by division, like the announcement",
-      "**__Premier League:__**" in picker and "**__Bundesliga:__**" in picker, True)
-check("uses the same vs style as the announcement", " *vs* " in picker, True)
-check("gives the command for each fixture",
-      all("`/availability fixture:{}`".format(fid) in picker for fid in picker_ids),
-      True)
-check("no plain bullet points left over from the old format", "· **" not in picker, True)
-check("divisions in the same fixed order as the announcement",
-      picker.index("Premier League:") < picker.index("Bundesliga:"), True)
-
-print("\na single fixture still renders correctly")
-solo = fixture_picker(picker_store.fixtures(week=WEEK)[:1])
-check("one row, one division heading", solo.count("*vs*"), 1)
-
-print("\nan empty list produces an empty string rather than a stray heading")
-check("nothing to show", fixture_picker([]), "")
-
-print("\na fixture with no league falls back to a catch-all group")
-loose = picker_store.create_fixture(
-    "S17_Clubs", WEEK, "TEAM Z FC", "TEAM Y FC", 950, 951,
-    "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY,
-)
-leagueless = fixture_picker([picker_store.fixture(loose)])
-check("still lists the fixture", "TEAM Z FC" in leagueless, True)
-
-print("\na manager with dozens of open fixtures never crashes the reply")
-# What actually happened live: the same two test accounts were left managing
-# every team across three still-open gameweeks (season.seed_managers only
-# guarantees no shared manager within the one gameweek it is run for), so a
-# real account ended up with 47 open fixtures. Discord rejects any message
-# over 2000 characters outright, and fixture_picker had no cap at all - the
-# interaction failed with a 400 and the manager got no reply whatsoever.
-big_store = fresh_store()
-big_fixtures = []
-for week_n in range(3):                       # three open gameweeks worth
-    for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
-        fid = big_store.create_fixture(
-            "S17_Clubs", WEEK, _season.team_name(h), _season.team_name(a),
-            800 + week_n * 100 + n, 700, "2026-09-11T18:00:00Z",
-            Status.WAITING_FOR_AVAILABILITY, league=lg,
-        )
-        big_fixtures.append(big_store.fixture(fid))
-check("reproduces the live scale", len(big_fixtures), 60)
-
-big_picker = fixture_picker(big_fixtures)
-full_reply = ("You have more than one fixture open. Run the command under "
-             "the one you want to set:\n\n" + big_picker)
-check("stays comfortably under Discord's 2000-character limit",
-      len(full_reply) <= DISCORD_LIMIT, True)
-check("says how many were left off", "more" in big_picker, True)
-check("still names at least one real fixture", "`/availability fixture:" in big_picker, True)
-
-print("\nthe cap holds even at absurd scale")
-huge = big_fixtures * 5                        # 300 fixtures, one account
-huge_reply = ("You have more than one fixture open. Run the command under "
-             "the one you want to set:\n\n" + fixture_picker(huge))
-check("still under the limit at 300 fixtures", len(huge_reply) <= DISCORD_LIMIT, True)
 
 # --------------------------------------------------------------------------
 print("")

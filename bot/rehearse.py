@@ -141,10 +141,12 @@ def create(home_code, away_code):
 
 
 def submit(fixture_id, manager_id, picks):
-    """Exactly what the Submit button does, minus the clicking."""
+    """Exactly what the Submit button does, minus the clicking - one weekly
+    submission, logged against whichever fixture prompted it here."""
     state = SelectorState(timings.slots, saved=picks)
-    store.save_submission(fixture_id, manager_id, state.as_dict(), submitted=True)
-    store.mark_submitted(fixture_id, manager_id)
+    week = store.fixture(fixture_id)["week"]
+    store.save_weekly_submission(week, manager_id, state.as_dict(), submitted=True)
+    store.mark_weekly_submitted(week, manager_id, [fixture_id])
     return state
 
 

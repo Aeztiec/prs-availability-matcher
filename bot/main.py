@@ -201,10 +201,16 @@ class PRSBot(discord.Client):
                 log.warning("referee channel unreachable: %s", error)
         return await self.channel_for(week)
 
-    async def on_availability_submitted(self, fixture_id):
-        """Called by the submit button - schedule the moment both are in."""
-        if self.store.both_submitted(fixture_id):
-            await self.process(week=self.store.fixture(fixture_id)["week"])
+    async def on_availability_submitted(self, week):
+        """Called by the submit button with the week just submitted for.
+
+        A submission now covers every fixture the manager has that week, so
+        there's no single fixture to check "both submitted" against -
+        advance() already skips anything still missing a manager, so simply
+        running the week's pass is cheap and correct even when most of it
+        does nothing yet.
+        """
+        await self.process(week=week)
 
     # -------------------------------------------------------------- runner
     async def process(self, week=None):
@@ -378,6 +384,23 @@ class PRSBot(discord.Client):
             and not f["slot_key"]
             and (f["gameweek"] is None or f["gameweek"] in allowed)
         ]
+
+    def my_open_week(self, user_id, now=None):
+        """The single week to open a manager's selector for, and every open
+        fixture of theirs in it.
+
+        A manager normally has exactly one open fixture, in one week. Someone
+        managing more than one team can have several at once, all sharing a
+        week - one selector covers all of them. Two gameweeks opened early is
+        the only way to land in two different weeks simultaneously; that's
+        rare enough that the simplest thing is to surface whichever is due
+        soonest and let them come back for the other closer to its deadline.
+        """
+        mine = self.my_open_fixtures(user_id, now)
+        if not mine:
+            return None, []
+        week = min(mine, key=lambda f: f["deadline"])["week"]
+        return week, [f for f in mine if f["week"] == week]
 
     def offerable_slots(self, gameweek_key=None):
         """Slots legal for a gameweek: within the daily kickoff window, and
@@ -618,12 +641,9 @@ def register(bot):
     test_group = app_commands.Group(name="test", description="Staff: fake activity for testing")
 
     # ------------------------------------------------------------- managers
-    @tree.command(description="Set your availability for a fixture")
-    @app_commands.describe(fixture="Fixture number, if you have more than one")
-    async def availability(interaction, fixture: int = None):
-        mine = bot.my_open_fixtures(interaction.user.id)
-        if fixture is not None:
-            mine = [f for f in mine if f["id"] == fixture]
+    @tree.command(description="Set your availability for the week")
+    async def availability(interaction):
+        week, mine = bot.my_open_week(interaction.user.id)
         if not mine:
             open_now = ", ".join(gw.key for gw in bot.open_gameweeks()) or "none"
             await interaction.response.send_message(
@@ -633,14 +653,9 @@ def register(bot):
                 ephemeral=True,
             )
             return
-        if len(mine) > 1:
-            await interaction.response.send_message(
-                "You have more than one fixture open. Run the command under "
-                "the one you want to set:\n\n" + notify.fixture_picker(mine),
-                ephemeral=True,
-            )
-            return
-        await open_selector(interaction, store, Target(SCOPE_FIXTURE, mine[0]["id"]),
+        # One selector for the whole week - it covers every fixture just
+        # found above, even if that's more than one team's game.
+        await open_selector(interaction, store, Target(SCOPE_FIXTURE, week),
                             bot.offerable_slots(mine[0]["gameweek"]))
 
     # ------------------------------------------------------------- fixtures
@@ -684,8 +699,9 @@ def register(bot):
             )
             return
 
+        week = week_of(when)
         fixture_id = store.create_fixture(
-            bot.timings.competition.key, week_of(when),
+            bot.timings.competition.key, week,
             resolved["home"], resolved["away"],
             home_manager.id, away_manager.id, to_iso(when),
             Status.WAITING_FOR_AVAILABILITY,
@@ -693,11 +709,13 @@ def register(bot):
         fixture = store.fixture(fixture_id)
 
         # Posted, not DM'd: the fixture appears on the week's announcement,
-        # and its managers use the same button as everyone else.
+        # and its managers use the same button as everyone else. The button
+        # opens the same weekly selector /availability does, in case either
+        # manager already has another fixture of their own that week.
         posted = await bot.post(
             interaction.channel,
             notify.ask_for_availability(fixture, to_iso(when)),
-            view=opener(Target(SCOPE_FIXTURE, fixture_id)),
+            view=opener(Target(SCOPE_FIXTURE, week)),
         )
         await interaction.followup.send(
             "Created **#{}**: {} vs {}, deadline {}.\n{}".format(

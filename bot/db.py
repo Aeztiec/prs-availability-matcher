@@ -6,8 +6,10 @@ complexity of async database access - the queries finish in microseconds.
 
 Two things are load-bearing:
 
-* Manager submissions live in their own table, not on the fixture. Managers can
-  edit right up to the deadline, and keeping the raw response separate means
+* A manager's availability is submitted once per week, not once per fixture -
+  someone managing more than one team answers the same "what times can you
+  play" question once, and it applies to every fixture of theirs that week.
+  It lives in its own table keyed by (week, manager), not on the fixture, so
   rescheduling never loses what they actually said.
 * Nothing is ever overwritten silently. Every decision appends to `log`, so
   when a fixture ends up somewhere surprising you can read back exactly what
@@ -43,13 +45,17 @@ CREATE TABLE IF NOT EXISTS fixtures (
     created_at       TEXT    NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS submissions (
-    fixture_id   INTEGER NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
+-- One submission per manager per week, not per fixture - a manager who
+-- manages more than one team answers "what times can you play this week"
+-- once, and the orchestrator applies it to every one of their fixtures that
+-- share the week.
+CREATE TABLE IF NOT EXISTS weekly_submissions (
+    week         TEXT    NOT NULL,
     manager_id   INTEGER NOT NULL,
     slots        TEXT    NOT NULL,
     submitted    INTEGER NOT NULL DEFAULT 0,
     updated_at   TEXT    NOT NULL,
-    PRIMARY KEY (fixture_id, manager_id)
+    PRIMARY KEY (week, manager_id)
 );
 
 CREATE TABLE IF NOT EXISTS referees (
@@ -221,11 +227,11 @@ class Store:
         self.note(fixture_id, "{} reminder sent".format(which))
 
     # -------------------------------------------------------- submissions
-    def submission(self, fixture_id, manager_id):
+    def weekly_submission(self, week, manager_id):
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM submissions WHERE fixture_id=? AND manager_id=?",
-                (fixture_id, manager_id),
+                "SELECT * FROM weekly_submissions WHERE week=? AND manager_id=?",
+                (week, manager_id),
             ).fetchone()
         if not row:
             return None
@@ -233,35 +239,42 @@ class Store:
         record["slots"] = json.loads(record["slots"])
         return record
 
-    def save_submission(self, fixture_id, manager_id, slots, submitted=False):
-        """Upsert a manager's picks. Called on every button click, so it must
-        stay cheap and must not clobber the `submitted` flag by accident."""
+    def save_weekly_submission(self, week, manager_id, slots, submitted=False):
+        """Upsert a manager's picks for a week. Called on every button click,
+        so it must stay cheap and must not clobber the `submitted` flag by
+        accident."""
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO submissions (fixture_id, manager_id, slots, submitted, updated_at)
+                """INSERT INTO weekly_submissions (week, manager_id, slots, submitted, updated_at)
                    VALUES (?,?,?,?,?)
-                   ON CONFLICT(fixture_id, manager_id) DO UPDATE SET
+                   ON CONFLICT(week, manager_id) DO UPDATE SET
                        slots=excluded.slots,
-                       submitted=MAX(submissions.submitted, excluded.submitted),
+                       submitted=MAX(weekly_submissions.submitted, excluded.submitted),
                        updated_at=excluded.updated_at""",
-                (fixture_id, manager_id, json.dumps(slots, sort_keys=True),
+                (week, manager_id, json.dumps(slots, sort_keys=True),
                  1 if submitted else 0, now()),
             )
 
-    def mark_submitted(self, fixture_id, manager_id):
+    def mark_weekly_submitted(self, week, manager_id, fixture_ids=()):
+        """Flag a week's submission as final, and log it against every
+        fixture it now covers - the audit trail lives per fixture, even
+        though the submission itself does not."""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE submissions SET submitted=1, updated_at=? WHERE fixture_id=? AND manager_id=?",
-                (now(), fixture_id, manager_id),
+                "UPDATE weekly_submissions SET submitted=1, updated_at=? "
+                "WHERE week=? AND manager_id=?",
+                (now(), week, manager_id),
             )
-        self.note(fixture_id, "manager submitted", str(manager_id))
+        for fixture_id in fixture_ids:
+            self.note(fixture_id, "manager submitted", str(manager_id))
 
     def both_submitted(self, fixture_id):
+        """Have both of a fixture's managers submitted their week yet?"""
         fixture = self.fixture(fixture_id)
         if not fixture:
             return False
         return all(
-            (self.submission(fixture_id, mid) or {}).get("submitted")
+            (self.weekly_submission(fixture["week"], mid) or {}).get("submitted")
             for mid in (fixture["home_manager_id"], fixture["away_manager_id"])
         )
 
@@ -490,7 +503,7 @@ class Store:
             conn.execute("DELETE FROM ref_boards WHERE week=?", (week,))
 
     def unsubmitted_managers(self, fixture_id):
-        """Managers on a fixture who have not pressed submit.
+        """Managers on a fixture whose week they have not submitted yet.
 
         The dashboard needs names, not a count - "waiting on 1" doesn't tell
         staff who to chase.
@@ -500,7 +513,7 @@ class Store:
             return []
         missing = []
         for manager_id in (fixture["home_manager_id"], fixture["away_manager_id"]):
-            record = self.submission(fixture_id, manager_id)
+            record = self.weekly_submission(fixture["week"], manager_id)
             if not record or not record["submitted"]:
                 missing.append(manager_id)
         return missing

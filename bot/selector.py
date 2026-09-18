@@ -5,8 +5,9 @@ here. Everything that decides what a click means, what gets stored, and what
 the message should say lives in this module so it can be tested without a
 gateway connection, a token, or a live server.
 
-Managers use it per fixture; referees use the same thing per week. The only
-difference is what the saved state is keyed against, so both share this code.
+One manager's picks for one week - what they saved is keyed by (week,
+manager) in views.py's Target, so the same picks apply to every fixture they
+have that week rather than being entered once per fixture.
 """
 
 from __future__ import annotations

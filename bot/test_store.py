@@ -56,9 +56,9 @@ check("no slot yet", row["slot_key"], None)
 check("creation is logged", store.history(fid)[0]["event"], "fixture created")
 
 # --------------------------------------------------------------------------
-print("\nsubmissions are editable until submitted, and stored apart from the fixture")
+print("\nsubmissions are per week, editable until submitted, and stored apart from the fixture")
 # --------------------------------------------------------------------------
-check("nothing submitted yet", store.submission(fid, 111), None)
+check("nothing submitted yet", store.weekly_submission(WEEK, 111), None)
 
 state = SelectorState(SLOTS)
 check("everything defaults to NO", set(state.as_dict().values()), {0})
@@ -70,8 +70,8 @@ check("fourth click -> IDEAL again", state.cycle("sat_1800"), Pref.IDEAL)
 
 state.cycle("sat_1700")          # IDEAL
 state.cycle("sat_1700")          # FINE
-store.save_submission(fid, 111, state.as_dict())
-saved = store.submission(fid, 111)
+store.save_weekly_submission(WEEK, 111, state.as_dict())
+saved = store.weekly_submission(WEEK, 111)
 check("picks persisted", saved["slots"], {"sat_1700": 1, "sat_1800": 2, "sun_1700": 0, "sun_1800": 0})
 check("not yet flagged submitted", saved["submitted"], 0)
 check("both_submitted is false", store.both_submitted(fid), False)
@@ -83,12 +83,13 @@ check("IDEAL restored", reopened.get("sat_1800"), Pref.IDEAL)
 check("untouched stays NO", reopened.get("sun_1800"), Pref.NO)
 
 print("\nediting after submitting keeps the submitted flag")
-store.mark_submitted(fid, 111)
-check("flag set", store.submission(fid, 111)["submitted"], 1)
+store.mark_weekly_submitted(WEEK, 111, [fid])
+check("flag set", store.weekly_submission(WEEK, 111)["submitted"], 1)
+check("logged against the fixture it covers", store.history(fid)[-1]["event"], "manager submitted")
 reopened.cycle("sun_1800")
-store.save_submission(fid, 111, reopened.as_dict())          # submitted defaults False
-check("flag survives an edit", store.submission(fid, 111)["submitted"], 1)
-check("edit was stored", store.submission(fid, 111)["slots"]["sun_1800"], 2)
+store.save_weekly_submission(WEEK, 111, reopened.as_dict())   # submitted defaults False
+check("flag survives an edit", store.weekly_submission(WEEK, 111)["submitted"], 1)
+check("edit was stored", store.weekly_submission(WEEK, 111)["slots"]["sun_1800"], 2)
 
 # --------------------------------------------------------------------------
 print("\nan all-NO submission is refused")
@@ -103,11 +104,11 @@ check("a single pick unblocks it",
 print("\nboth managers submitted -> the engine can run")
 # --------------------------------------------------------------------------
 away = SelectorState(SLOTS, saved={"sat_1800": 2, "sun_1700": 1})
-store.save_submission(fid, 222, away.as_dict(), submitted=True)
+store.save_weekly_submission(WEEK, 222, away.as_dict(), submitted=True)
 check("both submitted", store.both_submitted(fid), True)
 
-home_picks = store.submission(fid, 111)["slots"]
-away_picks = store.submission(fid, 222)["slots"]
+home_picks = store.weekly_submission(WEEK, 111)["slots"]
+away_picks = store.weekly_submission(WEEK, 222)["slots"]
 decision = schedule_from_preferences(SLOTS, home_picks, away_picks)
 check("picked the shared IDEAL slot", decision.slot.key, "sat_1800")
 store.set_schedule(fid, decision.slot.key, decision.source, decision.status)
@@ -125,6 +126,9 @@ check("rescheduling ignores its own slot",
 
 second = store.create_fixture("S17_Clubs", WEEK, "ABC FC", "DEF FC", 111, 333,
                               "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY)
+check("111 manages ABC's second fixture too, with no fresh submission needed",
+      store.weekly_submission(WEEK, 111)["slots"]["sat_1800"], 2)
+
 both_ideal = {s.key: Pref.IDEAL for s in SLOTS}
 avoid = schedule_from_preferences(
     SLOTS, both_ideal, both_ideal,

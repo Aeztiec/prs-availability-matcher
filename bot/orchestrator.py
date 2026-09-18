@@ -62,10 +62,10 @@ class Outcome:
 
 
 def _missing_managers(store, fixture):
-    """Managers who have not pressed submit yet."""
+    """Managers who have not submitted their week yet."""
     missing = []
     for manager_id in (fixture["home_manager_id"], fixture["away_manager_id"]):
-        record = store.submission(fixture["id"], manager_id)
+        record = store.weekly_submission(fixture["week"], manager_id)
         if not record or not record["submitted"]:
             missing.append(manager_id)
     return missing
@@ -102,8 +102,8 @@ def advance(store, timings, fixture, now=None, rng=None):
     load, busy = _context(store, fixture)
 
     if not missing:
-        home = store.submission(fixture_id, fixture["home_manager_id"])["slots"]
-        away = store.submission(fixture_id, fixture["away_manager_id"])["slots"]
+        home = store.weekly_submission(fixture["week"], fixture["home_manager_id"])["slots"]
+        away = store.weekly_submission(fixture["week"], fixture["away_manager_id"])["slots"]
         decision = schedule_from_preferences(
             _biddable_slots(timings), home, away, load=load, busy=busy, rng=rng
         )

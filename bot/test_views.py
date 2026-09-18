@@ -59,7 +59,8 @@ for index, day in enumerate(["Saturday", "Sunday", "Friday (Low Priority)"]):
         SLOTS.append(Slot(key=slot.key, day=slot.day, day_index=index, clock=slot.clock,
                           minutes=slot.minutes, low_priority=(index == 2)))
 
-FIXTURE_TARGET = Target(SCOPE_FIXTURE, 1024)
+WEEK = "2026-09-19"
+WEEK_TARGET = Target(SCOPE_FIXTURE, WEEK)
 
 
 # --------------------------------------------------------------------------
@@ -76,24 +77,24 @@ def emitted_ids(target):
     ]
 
 
-for cls, custom_id in emitted_ids(FIXTURE_TARGET):
+for cls, custom_id in emitted_ids(WEEK_TARGET):
     pattern = cls.__discord_ui_compiled_template__
     check("{:<14} routes: {}".format(cls.__name__, custom_id),
           bool(pattern.fullmatch(custom_id)), True)
 
 print("\nids stay inside Discord's 100-character cap")
-longest = max(len(cid) for _, cid in emitted_ids(FIXTURE_TARGET))
+longest = max(len(cid) for _, cid in emitted_ids(WEEK_TARGET))
 check("longest id is {} chars".format(longest), longest <= 100, True)
 
 print("\nthe captured groups come back with the right values")
-slot_id = SlotButton(FIXTURE_TARGET, SLOTS[0], Pref.NO).custom_id
+slot_id = SlotButton(WEEK_TARGET, SLOTS[0], Pref.NO).custom_id
 match = SlotButton.__discord_ui_compiled_template__.fullmatch(slot_id)
 check("scope", match["scope"], "fx")
-check("ref", match["ref"], "1024")
+check("ref is the week key, not a fixture id", match["ref"], WEEK)
 check("slot", match["slot"], SLOTS[0].key)
 
 print("\ntemplates don't overlap - one id must route to exactly one button type")
-for _, custom_id in emitted_ids(FIXTURE_TARGET):
+for _, custom_id in emitted_ids(WEEK_TARGET):
     hits = [c.__name__ for c in DYNAMIC_ITEMS
             if c.__discord_ui_compiled_template__.fullmatch(custom_id)]
     check("{} -> {}".format(custom_id, hits), len(hits), 1)
@@ -102,13 +103,22 @@ for _, custom_id in emitted_ids(FIXTURE_TARGET):
 print("\nviews build inside Discord's component budget")
 # --------------------------------------------------------------------------
 class FakeStore:
-    def fixture(self, fixture_id):
-        return {"id": fixture_id, "home_team": "ABC FC", "away_team": "XYZ FC",
-                "home_manager_id": 111, "away_manager_id": 222, "slot_key": None}
+    """A manager's fixtures for one week - Target now resolves everything
+    (may_answer, closed, heading) against this instead of a single fixture."""
+
+    def __init__(self, fixtures=None):
+        self._fixtures = fixtures if fixtures is not None else [
+            {"id": 1024, "home_team": "ABC FC", "away_team": "XYZ FC",
+             "home_manager_id": 111, "away_manager_id": 222,
+             "slot_key": None, "gameweek": None, "week": WEEK},
+        ]
+
+    def fixtures(self, week=None):
+        return [f for f in self._fixtures if week is None or f["week"] == week]
 
 
 state = SelectorState(SLOTS)
-view, active_day = build_view(FakeStore(), FIXTURE_TARGET, state)
+view, active_day = build_view(WEEK_TARGET, state)
 check("opens on the first day", active_day, "Saturday")
 check("3 day tabs + 7 slots + submit + clear", len(view.children), 12)
 check("within the 25-component cap", len(view.children) <= 25, True)
@@ -120,7 +130,7 @@ for item in view.children:
 check("no row exceeds 5 buttons", max(counts.values()) <= 5, True)
 
 print("\nswitching day shows that day's slots")
-view_sunday, day = build_view(FakeStore(), FIXTURE_TARGET, state, "Sunday")
+view_sunday, day = build_view(WEEK_TARGET, state, "Sunday")
 check("active day honoured", day, "Sunday")
 labels = [i.item.label for i in view_sunday.children if i.custom_id.startswith("av:")]
 check("7 Sunday slots", len(labels), 7)
@@ -128,7 +138,7 @@ check("labels carry the state emoji", all(l.startswith("⚪") for l in labels), 
 
 print("\nbutton labels reflect saved picks")
 picked = SelectorState(SLOTS, saved={SLOTS[0].key: 2, SLOTS[1].key: 1})
-view_picked, _ = build_view(FakeStore(), FIXTURE_TARGET, picked)
+view_picked, _ = build_view(WEEK_TARGET, picked)
 slot_labels = {i.custom_id.rsplit(":", 1)[1]: i.item.label
                for i in view_picked.children if i.custom_id.startswith("av:")}
 check("IDEAL shows green", slot_labels[SLOTS[0].key].startswith("🟢"), True)
@@ -139,7 +149,7 @@ print("\na 13-slot half-hourly day still fits (granularity 30)")
 half_hourly = [Slot(key=s.key, day=s.day, day_index=0, clock=s.clock,
                     minutes=s.minutes, low_priority=False)
                for s in make_slots("Saturday", 13, step=30)]
-view_dense, _ = build_view(FakeStore(), Target(SCOPE_FIXTURE, 1), SelectorState(half_hourly))
+view_dense, _ = build_view(Target(SCOPE_FIXTURE, WEEK), SelectorState(half_hourly))
 dense_counts = {}
 for item in view_dense.children:
     dense_counts[item.row] = dense_counts.get(item.row, 0) + 1
@@ -149,36 +159,60 @@ check("still at most 5 per row", max(dense_counts.values()) <= 5, True)
 check("still at most 5 rows", max(dense_counts) <= 4, True)
 
 # --------------------------------------------------------------------------
-print("\nonly the fixture's own managers may answer")
+print("\nonly a manager on one of the week's fixtures may answer")
 # --------------------------------------------------------------------------
-check("home manager may", FIXTURE_TARGET.may_answer(FakeStore(), 111), True)
-check("away manager may", FIXTURE_TARGET.may_answer(FakeStore(), 222), True)
-check("a stranger may not", FIXTURE_TARGET.may_answer(FakeStore(), 999), False)
+check("home manager may", WEEK_TARGET.may_answer(FakeStore(), 111), True)
+check("away manager may", WEEK_TARGET.may_answer(FakeStore(), 222), True)
+check("a stranger may not", WEEK_TARGET.may_answer(FakeStore(), 999), False)
 
-print("\nan already-scheduled fixture is closed to edits")
-class ScheduledStore(FakeStore):
-    def fixture(self, fixture_id):
-        row = super().fixture(fixture_id)
-        row["slot_key"] = "sat_1800"
-        return row
-
-
+print("\na manager who has no fixtures that week at all is closed, with a reason")
 check("closed with a reason",
-      "already scheduled" in FIXTURE_TARGET.closed(ScheduledStore()), True)
-check("open while unscheduled", FIXTURE_TARGET.closed(FakeStore()), None)
+      "no fixtures" in WEEK_TARGET.closed(FakeStore(), 999), True)
+check("open while unscheduled", WEEK_TARGET.closed(FakeStore(), 111), None)
+
+print("\nonce every one of a manager's fixtures that week is scheduled, it closes")
+scheduled_store = FakeStore(fixtures=[
+    {"id": 1024, "home_team": "ABC FC", "away_team": "XYZ FC",
+     "home_manager_id": 111, "away_manager_id": 222,
+     "slot_key": "sat_1800", "gameweek": None, "week": WEEK},
+])
+check("closed with a reason",
+      "already scheduled" in WEEK_TARGET.closed(scheduled_store, 111), True)
+
+print("\none submission covers every fixture a manager has that week")
+multi_store = FakeStore(fixtures=[
+    {"id": 1024, "home_team": "ABC FC", "away_team": "XYZ FC",
+     "home_manager_id": 111, "away_manager_id": 222,
+     "slot_key": None, "gameweek": None, "week": WEEK},
+    {"id": 1025, "home_team": "DEF FC", "away_team": "GHI FC",
+     "home_manager_id": 111, "away_manager_id": 333,
+     "slot_key": None, "gameweek": None, "week": WEEK},
+])
+check("still open with two fixtures to answer for",
+      multi_store.fixtures(week=WEEK).__len__(), 2)
+check("both list the shared manager",
+      WEEK_TARGET.may_answer(multi_store, 111), True)
+check("heading lists both of their fixtures",
+      ("#1024" in WEEK_TARGET.heading(multi_store, 111)
+       and "#1025" in WEEK_TARGET.heading(multi_store, 111)), True)
+check("a single-fixture manager gets the plain #id · vs heading",
+      WEEK_TARGET.heading(multi_store, 222), "#1024 · ABC FC vs XYZ FC")
+check("only their fixtures are listed, not the other manager's",
+      "#1025" in WEEK_TARGET.heading(multi_store, 222), False)
 
 # --------------------------------------------------------------------------
 print("\nthe DM opener button")
 # --------------------------------------------------------------------------
 # "avo:" must not be swallowed by the "av:" slot template - if it were, the DM
 # button would route to a slot handler and cycle a nonexistent slot.
-open_id = OpenButton(FIXTURE_TARGET).custom_id
-check("opener id", open_id, "avo:fx:1024")
+open_id = OpenButton(WEEK_TARGET).custom_id
+check("opener id", open_id, "avo:fx:{}".format(WEEK))
 check("does not match the slot template",
       bool(SlotButton.__discord_ui_compiled_template__.fullmatch(open_id)), False)
 check("a slot id does not match the opener template",
-      bool(OpenButton.__discord_ui_compiled_template__.fullmatch("av:fx:1024:sat_1600")), False)
-view_dm = opener(FIXTURE_TARGET)
+      bool(OpenButton.__discord_ui_compiled_template__.fullmatch(
+          "av:fx:{}:sat_1600".format(WEEK))), False)
+view_dm = opener(WEEK_TARGET)
 check("one button on the DM view", len(view_dm.children), 1)
 check("labelled for a human", view_dm.children[0].item.label, "Set availability")
 
