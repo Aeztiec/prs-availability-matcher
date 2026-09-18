@@ -204,13 +204,10 @@ LEAGUES = {
 # only works because this code is deliberately absent from that dict.
 UEFA_LEAGUE = "UEFA"
 
-# Optional emoji shown next to a fixture instead of the padded `(DOM)` /
-# `(UEFA)` text tag, once uploaded - same usable_emoji() fallback as
-# SEASON_EMOJI/LEAGUE_EMOJI/TEAM_EMOJI below, so leaving either blank (or
-# filling in an id that doesn't resolve yet) just keeps the text tag rather
-# than breaking anything. Fill in with the real "<:name:id>" once uploaded.
-DOMESTIC_TAG_EMOJI = ""
-UEFA_TAG_EMOJI = ""
+# The UEFA competition's own emoji, shown inside the (UEFA) tag. Domestic
+# fixtures use their league's LEAGUE_EMOJI below instead. Same usable_emoji()
+# fallback as the others: blank just leaves the tag without one.
+UEFA_TAG_EMOJI = "<:UEFA:1550535644080508969>"
 
 # home, away, league - transcribed from the published gameweek fixture lists.
 FIXTURES = {
