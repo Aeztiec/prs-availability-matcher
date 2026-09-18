@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
 
+from .weeks import uk_local_to_utc
+
 SEASON = "S17"
 
 # How the season reads in a public post's heading: "PRS SEASON 17 GAMEWEEK 1:".
@@ -40,13 +42,20 @@ LEAGUE_EMOJI = {
 }
 
 # No match may start before this. From the league instructions: "You can
-# schedule games to be played from Thursday, 17 September 2026 17:30 onwards".
-KICKOFF_FLOOR = datetime(2026, 9, 17, 17, 30, tzinfo=timezone.utc)
+# schedule games to be played from Thursday, 17 September 2026 17:30 onwards"
+# - stated in the league's own (UK) clock, so it has to track BST/GMT rather
+# than sit fixed to one UTC instant. uk_local_to_utc() converts the wall-clock
+# value the instructions actually say into the correct UTC moment for the
+# date it falls on.
+KICKOFF_FLOOR = uk_local_to_utc(datetime(2026, 9, 17, 17, 30))
 
 # The deadline is the start of Thursday, i.e. the moment Wednesday ends. So
-# "by Wednesday" means the whole of Wednesday is still in play.
+# "by Wednesday" means the whole of Wednesday is still in play. Stated as a
+# UK local wall-clock time, same reasoning as KICKOFF_FLOOR above - see
+# Gameweek.deadline, which is where the BST/GMT conversion actually happens
+# since it depends on which calendar date each gameweek's Thursday falls on.
 DEADLINE_WEEKDAY_OFFSET = -1          # Friday - 1 = Thursday
-DEADLINE_TIME = time(0, 0, tzinfo=timezone.utc)
+DEADLINE_LOCAL_TIME = time(0, 0)
 
 # How many gameweeks past the current one managers may schedule into. The
 # league allows two, but only with an Officials' unlock - so the default is
@@ -255,9 +264,14 @@ class Gameweek:
 
     @property
     def deadline(self):
-        """End of the Wednesday before."""
+        """End of the Wednesday before, in UK local time.
+
+        Converted to the correct UTC instant per gameweek, not once for the
+        whole season - a September deadline and a December deadline don't
+        sit the same number of hours from UTC.
+        """
         day = (self.friday + timedelta(days=DEADLINE_WEEKDAY_OFFSET)).date()
-        return datetime.combine(day, DEADLINE_TIME)
+        return uk_local_to_utc(datetime.combine(day, DEADLINE_LOCAL_TIME))
 
     @property
     def fixtures(self):

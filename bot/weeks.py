@@ -120,6 +120,76 @@ def discord_time(moment, style="F"):
     return "<t:{}:{}>".format(int(moment.timestamp()), style)
 
 
+def _last_sunday(year, month):
+    """The date of the last Sunday in a given month."""
+    if month == 12:
+        next_month = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        next_month = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    last_day = next_month - timedelta(days=1)
+    return last_day - timedelta(days=(last_day.weekday() - 6) % 7)
+
+
+def _bst_bounds(year):
+    """[start, end) as UTC instants - British Summer Time runs from 01:00 UTC
+    on the last Sunday of March to 01:00 UTC on the last Sunday of October.
+
+    Worked out by hand rather than via zoneinfo: Windows has no system IANA
+    timezone database, so ZoneInfo("Europe/London") raises
+    ZoneInfoNotFoundError unless the tzdata package is installed - not a
+    dependency this project otherwise needs. BST's rule is fixed and simple
+    enough not to need one.
+    """
+    start = _last_sunday(year, 3).replace(hour=1, minute=0, second=0, microsecond=0)
+    end = _last_sunday(year, 10).replace(hour=1, minute=0, second=0, microsecond=0)
+    return start, end
+
+
+def uk_time(moment):
+    """(local moment, "BST" or "GMT") - the UK's own clock for a UTC instant.
+
+    Deadlines are the league's own cutoff, stated in its own clock - unlike a
+    kickoff time, there is no reason to show it in each reader's timezone, so
+    this is deliberately a plain moment plus a label rather than a Discord
+    timestamp.
+    """
+    start, end = _bst_bounds(moment.year)
+    if start <= moment < end:
+        return moment + timedelta(hours=1), "BST"
+    return moment, "GMT"
+
+
+def uk_local_to_utc(naive_local):
+    """The UTC instant that reads as `naive_local` on a clock in the UK.
+
+    The inverse of uk_time(): given a wall-clock value as the league states
+    it ("Thursday 00:00", "17:30"), find the correct UTC moment, which shifts
+    by an hour depending on whether that date falls in BST or GMT. Treating
+    the naive value as if it were already UTC to check it against the BST
+    bounds is safe outside the one-hour changeover itself, since the BST
+    window is otherwise many months wide - nothing this bot schedules lands
+    inside that single hour on the last Sunday of March or October.
+    """
+    guess = naive_local.replace(tzinfo=timezone.utc)
+    start, end = _bst_bounds(guess.year)
+    if start <= guess < end:
+        return guess - timedelta(hours=1)
+    return guess
+
+
+def format_uk(moment):
+    """'Thursday, 17 September 2026 00:00 BST' - a fixed UK wall-clock time.
+
+    %d would zero-pad the day (e.g. "07"); day-of-month is built by hand
+    instead to avoid that, since %-d/%#d are not portable between platforms.
+    """
+    local, label = uk_time(moment)
+    return "{}, {} {} {} {:02d}:{:02d} {}".format(
+        local.strftime("%A"), local.day, local.strftime("%B"), local.year,
+        local.hour, local.minute, label,
+    )
+
+
 def reminders_due(deadline, now, offsets_hours, already_sent):
     """Which reminder offsets should fire now.
 

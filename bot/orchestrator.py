@@ -25,7 +25,18 @@ from .referees import ROLE_REF
 from .scheduling import (
     Status, schedule_from_preferences, schedule_from_sheet, schedule_randomly,
 )
+from .slots import within_kickoff_window
 from .weeks import from_iso, reminders_due, utcnow
+
+
+def _biddable_slots(timings):
+    """Slots the automatic paths may pick, as opposed to the full sheet list.
+
+    Staff can still schedule a fixture to any slot the sheet knows about by
+    hand with /fixture set - this is only what the engine and the fallback
+    are allowed to choose on their own.
+    """
+    return [slot for slot in timings.slots if within_kickoff_window(slot)]
 
 
 class Action:
@@ -94,7 +105,7 @@ def advance(store, timings, fixture, now=None, rng=None):
         home = store.submission(fixture_id, fixture["home_manager_id"])["slots"]
         away = store.submission(fixture_id, fixture["away_manager_id"])["slots"]
         decision = schedule_from_preferences(
-            timings.slots, home, away, load=load, busy=busy, rng=rng
+            _biddable_slots(timings), home, away, load=load, busy=busy, rng=rng
         )
         return _apply(store, fixture, decision)
 
@@ -147,7 +158,7 @@ def _fallback(timings, fixture, load, busy, rng):
         from .scheduling import Decision
         return Decision(reason="team not found in the timings sheet: {}".format(error))
     return schedule_from_sheet(
-        timings.slots, home_free, away_free, load=load, busy=busy, rng=rng
+        _biddable_slots(timings), home_free, away_free, load=load, busy=busy, rng=rng
     )
 
 
@@ -197,7 +208,7 @@ def run_once_randomly(store, timings, week=None, competition=None, rng=None):
         if fixture["slot_key"]:
             continue
         load, busy = _context(store, fixture)
-        decision = schedule_randomly(timings.slots, load=load, busy=busy, rng=rng)
+        decision = schedule_randomly(_biddable_slots(timings), load=load, busy=busy, rng=rng)
         outcomes.append(_apply(store, fixture, decision,
                                detail="random slot for testing", note="test mode"))
     return outcomes

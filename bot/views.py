@@ -86,6 +86,11 @@ class Target:
             return "This fixture is already scheduled for {}.".format(fixture["slot_key"])
         return None
 
+    def gameweek(self, store):
+        """The fixture's gameweek key, for working out which slots are legal."""
+        fixture = store.fixture(int(self.ref))
+        return fixture["gameweek"] if fixture else None
+
 
 # --------------------------------------------------------------------------
 # rendering
@@ -157,8 +162,12 @@ class _SelectorButton:
     """Shared plumbing: identify the target, check permission, load state."""
 
     def context(self, interaction):
+        # offerable_slots(), not the raw slot list - a click rebuilding the
+        # view must never let a slot back in that the window or the season's
+        # kickoff floor already ruled out, even if the underlying sheet has
+        # more than that on offer.
         store = interaction.client.store
-        slots = interaction.client.slots
+        slots = interaction.client.offerable_slots(self.target.gameweek(store))
         return store, slots
 
     async def guard(self, interaction, target):
@@ -200,7 +209,8 @@ class SlotButton(
     @classmethod
     async def from_custom_id(cls, interaction, item, match):
         target = Target(match["scope"], match["ref"])
-        slots = interaction.client.slots
+        store = interaction.client.store
+        slots = interaction.client.offerable_slots(target.gameweek(store))
         slot = next((s for s in slots if s.key == match["slot"]), None)
         if slot is None:
             raise ValueError("unknown slot {}".format(match["slot"]))
@@ -239,7 +249,9 @@ class DayButton(
     async def from_custom_id(cls, interaction, item, match):
         target = Target(match["scope"], match["ref"])
         index = int(match["day"])
-        state = SelectorState(interaction.client.slots)
+        store = interaction.client.store
+        slots = interaction.client.offerable_slots(target.gameweek(store))
+        state = SelectorState(slots)
         days = state.days
         day = days[index] if index < len(days) else (days[0] if days else "")
         return cls(target, index, day)
@@ -294,8 +306,10 @@ class SubmitButton(
             ),
             ephemeral=True,
         )
+        # Target is always a fixture now - the referee weekly-selector scope
+        # this once had to be conditional on is gone (see the module docstring).
         hook = getattr(interaction.client, "on_availability_submitted", None)
-        if hook and self.target.is_fixture:
+        if hook:
             await hook(int(self.target.ref))
 
 

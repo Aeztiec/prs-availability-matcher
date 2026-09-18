@@ -58,8 +58,8 @@ SLOTS = make_slots(("Saturday", 17 * 60), ("Saturday", 18 * 60),
 class FakeTimings:
     """Stands in for the sheet, so fallback behaviour is controllable."""
 
-    def __init__(self, availability=None):
-        self.slots = SLOTS
+    def __init__(self, availability=None, slots=None):
+        self.slots = slots if slots is not None else SLOTS
         self._availability = availability or {}
 
     def availability(self, team):
@@ -222,6 +222,40 @@ fid = new_fixture(store)
 blank = {"ABC FC": {k.key: False for k in SLOTS}, "XYZ FC": sheet["XYZ FC"]}
 nothing = advance(store, FakeTimings(blank), store.fixture(fid), now=AFTER)
 check("no valid time", nothing.action, Action.NO_VALID_TIME)
+
+# --------------------------------------------------------------------------
+print("\nnone of the automatic paths will pick outside the 4pm-10pm window")
+# --------------------------------------------------------------------------
+# 2pm is on the sheet (a team really could have marked it), but the league
+# doesn't play that early - only /fixture set may put a fixture there.
+WITH_EARLY = SLOTS + make_slots(("Saturday", 14 * 60))
+
+store = fresh_store()
+fid = new_fixture(store)
+store.save_submission(fid, 111, {"sat_1400": 2, "sat_1800": 1}, submitted=True)
+store.save_submission(fid, 222, {"sat_1400": 2, "sat_1800": 1}, submitted=True)
+prefs = advance(store, FakeTimings(slots=WITH_EARLY), store.fixture(fid), now=BEFORE)
+check("both managers marked 2pm ideal, but it's never picked",
+      prefs.decision.slot.key != "sat_1400", True)
+check("the in-window tie is picked instead", prefs.decision.slot.key, "sat_1800")
+
+early_sheet = {"ABC FC": {"sat_1400": True, "sat_1800": False},
+              "XYZ FC": {"sat_1400": True, "sat_1800": False}}
+store = fresh_store()
+fid = new_fixture(store)
+fallback = advance(store, FakeTimings(early_sheet, slots=WITH_EARLY),
+                   store.fixture(fid), now=AFTER)
+check("the sheet fallback won't use 2pm either, even with no other overlap",
+      fallback.action, Action.NO_VALID_TIME)
+
+# Filtering happens before the random pick, not as a retry-until-valid, so
+# one run proves it regardless of seed - 2pm was never a candidate to begin
+# with, not just unlucky not to be chosen.
+store = fresh_store()
+fid = new_fixture(store)
+run_once_randomly(store, FakeTimings(slots=WITH_EARLY), week=WEEK, rng=random.Random(1))
+check("random test-scheduling never lands on 2pm either",
+      store.fixture(fid)["slot_key"] != "sat_1400", True)
 
 # --------------------------------------------------------------------------
 print("\nreminders through advance()")

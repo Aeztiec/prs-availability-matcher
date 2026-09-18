@@ -13,7 +13,7 @@ from bot.scheduling import (
     candidates_from_preferences, choose, combined_score,
     schedule_from_preferences, schedule_from_sheet, schedule_randomly,
 )
-from bot.slots import Slot, clean_day, parse_clock, slot_key
+from bot.slots import Slot, clean_day, parse_clock, slot_key, within_kickoff_window
 
 FAILURES = []
 
@@ -213,6 +213,21 @@ check("11:30 AM", parse_clock("11:30 AM"), 11 * 60 + 30)
 check("double space tolerated", parse_clock("12:00  PM"), 12 * 60)
 check("junk rejected", parse_clock("later"), None)
 check("slot keys are stable", slot_key("Friday (Low Priority)", 18 * 60), "fri_1800")
+
+# --------------------------------------------------------------------------
+print("\nthe daily kickoff window: 4pm-10pm GMT, nothing outside it")
+# --------------------------------------------------------------------------
+def at(minutes):
+    return Slot(key="x", day="Saturday", day_index=0, clock="x", minutes=minutes,
+               low_priority=False)
+
+
+check("4pm itself is allowed", within_kickoff_window(at(16 * 60)), True)
+check("10pm itself is allowed", within_kickoff_window(at(22 * 60)), True)
+check("6pm, well inside, is allowed", within_kickoff_window(at(18 * 60)), True)
+check("3:30pm is too early", within_kickoff_window(at(15 * 60 + 30)), False)
+check("10:30pm is too late", within_kickoff_window(at(22 * 60 + 30)), False)
+check("2am is nowhere near it", within_kickoff_window(at(2 * 60)), False)
 
 # --------------------------------------------------------------------------
 print("")

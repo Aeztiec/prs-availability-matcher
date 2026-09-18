@@ -28,12 +28,13 @@ from .fallback import Timings
 from .orchestrator import Action, dashboard, run_once, run_once_randomly
 from .scheduling import Status
 from .selector import fits_on_one_message, SelectorState
+from .slots import within_kickoff_window
 from .views import (
     DYNAMIC_ITEMS, SCOPE_FIXTURE, Target, availability_button,
     opener, open_selector,
 )
 from .weeks import (
-    from_iso, parse_deadline, slot_datetime, to_iso, utcnow, week_of,
+    from_iso, parse_deadline, slot_datetime, to_iso, uk_time, utcnow, week_of,
 )
 
 log = logging.getLogger("prsbot")
@@ -364,19 +365,24 @@ class PRSBot(discord.Client):
         ]
 
     def offerable_slots(self, gameweek_key=None):
-        """Slots legal for a gameweek, honouring the season's kickoff floor.
+        """Slots legal for a gameweek: within the daily kickoff window, and
+        honouring the season's kickoff floor.
 
-        Without this an early gameweek could offer a time before the season
-        opens, and the bot would happily schedule an illegal fixture.
+        The window keeps a manager from marking themselves free at a time the
+        league doesn't play; the floor keeps an early-opened gameweek from
+        offering a time before the season has even started. /fixture set is
+        the only path that can put a fixture anywhere the sheet knows about -
+        this is what everything automatic is limited to.
         """
+        slots = [slot for slot in self.slots if within_kickoff_window(slot)]
         if not gameweek_key:
-            return self.slots
+            return slots
         try:
             gw = season.gameweek(gameweek_key)
         except LookupError:
-            return self.slots
+            return slots
         return [
-            slot for slot in self.slots
+            slot for slot in slots
             if slot_datetime(gw.week, slot) >= season.KICKOFF_FLOOR
         ]
 
@@ -980,9 +986,10 @@ def register(bot):
             count = len(store.fixtures(gameweek=gw.key))
             if count:
                 marks.append("{} created".format(count))
-            lines.append("`{:<4}` {}: plays {}, deadline {}{}".format(
+            local, label = uk_time(gw.deadline)
+            lines.append("`{:<4}` {}: plays {}, deadline {} {}{}".format(
                 gw.key, gw.label, gw.friday.strftime("%a %d %b"),
-                gw.deadline.strftime("%a %d %b"),
+                local.strftime("%a %d %b %H:%M"), label,
                 "  · " + ", ".join(marks) if marks else "",
             ))
         lines += ["", "-# Managers can set availability for the current gameweek, "
@@ -1057,8 +1064,9 @@ def register(bot):
         except (discord.Forbidden, discord.HTTPException) as error:
             log.warning("could not post the announcement: %s", error)
 
-        parts = ["Opened **{}**: {} fixture(s) created, deadline {}.".format(
-            gw.key, len(made), gw.deadline.strftime("%a %d %b %H:%M UTC"))]
+        deadline_local, deadline_label = uk_time(gw.deadline)
+        parts = ["Opened **{}**: {} fixture(s) created, deadline {} {}.".format(
+            gw.key, len(made), deadline_local.strftime("%a %d %b %H:%M"), deadline_label)]
         if test:
             parts.append("-# TEST MODE: {} fixture(s) given a random kickoff time - "
                          "availability was skipped entirely.".format(scheduled))

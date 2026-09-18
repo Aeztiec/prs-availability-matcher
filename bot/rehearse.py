@@ -28,7 +28,7 @@ from .fallback import Timings
 from .orchestrator import Action, advance, dashboard
 from .scheduling import Pref, Source, Status
 from .selector import SelectorState, describe_choice
-from .weeks import from_iso, to_iso
+from .weeks import from_iso, to_iso, uk_time
 
 QUIET = "--quiet" in sys.argv
 PROBLEMS = []
@@ -102,8 +102,9 @@ rule("SETUP  ·  what staff does once")
 say("")
 say("    Competition   : {}".format(timings.title))
 say("    Gameweek      : {} (plays {})".format(gw.key, gw.friday.strftime("%a %d %b")))
-say("    Deadline      : {} (Wednesday's close)".format(
-    gw.deadline.strftime("%a %d %b %H:%M UTC")))
+_deadline_local, _deadline_label = uk_time(gw.deadline)
+say("    Deadline      : {} {} (Wednesday's close)".format(
+    _deadline_local.strftime("%a %d %b %H:%M"), _deadline_label))
 say("    Slots offered : {} across {}".format(
     len(timings.slots), ", ".join(sorted({s.day for s in timings.slots}))))
 say("    Referees      : {}".format(", ".join(REFS.values())))

@@ -25,6 +25,20 @@ from dataclasses import dataclass
 # budget, with the day tabs keeping any one message to 13 buttons plus two.
 GRANULARITY_MINUTES = 30
 
+# The league only runs matches between these hours, GMT+0 - nothing outside
+# 4pm-10pm may be offered to a manager or picked automatically, by the real
+# engine or the fallback alike. Staff can still put a fixture anywhere with
+# /fixture set, which checks against the sheet's full slot list rather than
+# this window - the window is what the automatic paths are held to, not a
+# property of which slots exist at all.
+KICKOFF_WINDOW = (16 * 60, 22 * 60)  # 4:00 PM to 10:00 PM
+
+
+def within_kickoff_window(slot):
+    start, end = KICKOFF_WINDOW
+    return start <= slot.minutes <= end
+
+
 _TIME = re.compile(r"^(\d{1,2}):(\d{2})\s*(AM|PM)$", re.I)
 
 

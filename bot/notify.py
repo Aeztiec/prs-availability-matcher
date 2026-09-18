@@ -17,7 +17,7 @@ from . import season
 from .referees import MAX_ASSISTANTS, ROLE_AR, ROLE_REF
 from .scheduling import Source
 
-from .weeks import discord_time, from_iso, slot_datetime, week_saturday
+from .weeks import discord_time, format_uk, from_iso, slot_datetime, week_saturday
 
 FOOTER = "-# Times show in your own timezone."
 
@@ -357,12 +357,16 @@ def fixture_board(fixtures, week, slot_for,
     if deadline is not None:
         footer += [
             "**SCHEDULING DEADLINE:**",
-            discord_time(deadline, "F"),
-            "-# Not agreed by then and Officials set the time from your "
-            "submitted timings.",
+            format_uk(deadline),
+            "**SCHEDULING EXTENSION:**",
+            format_uk(deadline + timedelta(days=7)),
         ]
-    footer.append("-# Times show in your own timezone. This post updates itself "
-                  "as fixtures are agreed.")
+    footer.append(
+        "-# Not agreed by then and Officials set the time from your submitted "
+        "timings. The absolute latest a fixture can be scheduled to, if "
+        "postponed. Times show in your own timezone. This post updates "
+        "itself as fixtures are agreed."
+    )
 
     return _chunk(lines, footer=footer)
 

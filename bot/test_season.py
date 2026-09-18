@@ -23,7 +23,7 @@ import availability as av
 from bot import season
 from bot.db import Store
 from bot.slots import build_slots
-from bot.weeks import slot_datetime
+from bot.weeks import slot_datetime, uk_time
 
 FAILURES = []
 
@@ -51,9 +51,15 @@ check("gameweeks are a week apart",
       {(season.ALL[i + 1].friday - season.ALL[i].friday).days for i in range(6)}, {7})
 
 print("\ndeadlines land at the start of Thursday, the moment Wednesday ends")
-check("GW1 deadline", season.gameweek("GW1").deadline, utc(2026, 9, 17, 0, 0))
-check("every deadline is a Thursday",
-      {gw.deadline.strftime("%A") for gw in season.ALL}, {"Thursday"})
+# Stated in UK local time, so the raw UTC instant is an hour earlier than
+# the naive "Thursday 00:00" reading whenever the date falls in BST - GW1
+# plays in September, so its deadline is really Wednesday 23:00 UTC.
+check("GW1 deadline (raw UTC, an hour ahead of GMT because of BST)",
+      season.gameweek("GW1").deadline, utc(2026, 9, 16, 23, 0))
+check("but reads as Thursday 00:00 in the UK's own clock",
+      uk_time(season.gameweek("GW1").deadline), (utc(2026, 9, 17, 0, 0), "BST"))
+check("every deadline is a Thursday in UK local time",
+      {uk_time(gw.deadline)[0].strftime("%A") for gw in season.ALL}, {"Thursday"})
 check("a deadline is always before its gameweek",
       all(gw.deadline < gw.friday for gw in season.ALL), True)
 
@@ -121,8 +127,10 @@ gw1 = season.gameweek("GW1")
 earliest = min(slot_datetime(gw1.week, s) for s in slots)
 check("GW1's earliest slot is after the season opens",
       earliest >= season.KICKOFF_FLOOR, True)
-check("the floor is the published Thursday 17:30",
-      season.KICKOFF_FLOOR, utc(2026, 9, 17, 17, 30))
+check("the floor is the published Thursday 17:30 UK time (16:30 UTC in BST)",
+      season.KICKOFF_FLOOR, utc(2026, 9, 17, 16, 30))
+check("which reads as 17:30 BST on the UK's own clock",
+      uk_time(season.KICKOFF_FLOOR), (utc(2026, 9, 17, 17, 30), "BST"))
 
 # A hypothetical earlier gameweek must have its illegal slots filtered out.
 too_early = [s for s in slots
