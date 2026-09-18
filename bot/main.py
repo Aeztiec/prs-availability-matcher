@@ -1355,14 +1355,12 @@ def register(bot):
         players from the sheet and Officials with whoever claimed the game, so
         staff delete and add rather than type everything."""
 
-        def __init__(self, fixture, home_score, away_score, competition, round_name, pens):
+        def __init__(self, fixture, home_score, away_score, pens):
             super().__init__(title="Result: {} vs {}".format(
                 season.team_code(fixture["home_team"]) or "HOME",
                 season.team_code(fixture["away_team"]) or "AWAY")[:45])
             self.fixture = fixture
             self.scores = (home_score, away_score)
-            self.competition = competition
-            self.round_name = round_name
             self.pens = pens
 
             def box(label, default="", placeholder=None):
@@ -1389,7 +1387,7 @@ def register(bot):
             text, problems = results.build(
                 self.fixture, self.scores[0], self.scores[1], self.home.value,
                 self.away.value, self.motm.value, self.officials.value, players,
-                self.competition, self.round_name, self.pens)
+                pens=self.pens)
             if problems:
                 await interaction.response.send_message(
                     embed=_discord_embed(notify.BoardEmbed(
@@ -1413,15 +1411,12 @@ def register(bot):
         away_score="Away team's goals",
         home_pens="Home team's penalty shootout goals, if there was one",
         away_pens="Away team's penalty shootout goals, if there was one",
-        competition="Shown in the heading if not the league (e.g. UEFA Champions League)",
-        round="Shown in the heading if not the gameweek (e.g. Final)",
     )
     @staff_only()
     async def result(interaction, game: str, home_score: app_commands.Range[int, 0, 99],
                      away_score: app_commands.Range[int, 0, 99],
                      home_pens: app_commands.Range[int, 0, 99] = None,
-                     away_pens: app_commands.Range[int, 0, 99] = None,
-                     competition: str = None, round: str = None):
+                     away_pens: app_commands.Range[int, 0, 99] = None):
         record = await resolve_game(interaction, game)
         if record is None:
             return
@@ -1436,7 +1431,7 @@ def register(bot):
             return
         pens = None if home_pens is None else (home_pens, away_pens)
         await interaction.response.send_modal(
-            ResultForm(record, home_score, away_score, competition, round, pens))
+            ResultForm(record, home_score, away_score, pens))
 
     result.autocomplete("game")(game_autocomplete())
 
