@@ -446,7 +446,7 @@ fields_embed = BoardEmbed(description="x" * 100,
                           footer="z" * 200, title="t" * 50)
 check("_embed_size counts title, description, fields, footer and the width padding",
       notify_module._embed_size(fields_embed),
-      50 + 100 + len("Deadline") + 500 + 200 + notify_module.EMBED_PAD)
+      50 + 100 + len("Deadline") + 500 + 200 + notify_module.EMBED_PAD + 1)
 
 print("\nthe TBD placeholder")
 tbd_store = fresh_store()
@@ -492,10 +492,10 @@ check("field never over the limit", len(_rows_field(rows)) <= 1024, True)
 
 print(chr(10) + "every embed is padded to full width")
 from bot.notify import widen, EMBED_PAD, BLANK, DESCRIPTION_CHUNK
-check("padding is invisible characters on the last line",
-      widen("short"), "short" + BLANK * EMBED_PAD)
+check("padding is a line of invisible characters under the text",
+      widen("short"), "short" + chr(10) + BLANK * EMBED_PAD)
 check("an empty description still gets it", widen(None), BLANK * EMBED_PAD)
-check("padded chunks still fit Discord's 4096", DESCRIPTION_CHUNK + EMBED_PAD <= 4096, True)
+check("padded chunks still fit Discord's 4096", DESCRIPTION_CHUNK + EMBED_PAD + 1 <= 4096, True)
 check("blank is not trimmed as whitespace", widen("x").strip().endswith(BLANK), True)
 
 
