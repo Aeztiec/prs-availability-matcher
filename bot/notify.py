@@ -128,11 +128,19 @@ def _roster_line(roster):
     )
 
 
+# Both tags are the same length so the badges after them start in the same
+# place on every row. That only works because they sit inside a code span:
+# Discord draws those in a monospace font, so equal character counts really do
+# mean equal widths - ordinary text is proportional and would drift.
+DOMESTIC_TAG = "( DOM )"
+UEFA_TAG = "(UEFA )"
+
+
 def league_tag(league):
-    """(DOM) or (UEFA) - which competition a fixture is in."""
+    """`( DOM )` or `(UEFA )` - which competition a fixture is in."""
     if not league:
         return ""
-    return "`({})` ".format("DOM" if league in season.LEAGUES else "UEFA")
+    return "`{}` ".format(DOMESTIC_TAG if league in season.LEAGUES else UEFA_TAG)
 
 
 def referee_board_row(fixture, slot, week, roster=()):
