@@ -128,22 +128,32 @@ def _roster_line(roster):
     )
 
 
-# Both tags are the same length so the badges after them start in the same
-# place on every row. That only works because they sit inside a code span:
-# Discord draws those in a monospace font, so equal character counts really do
-# mean equal widths - ordinary text is proportional and would drift.
-DOMESTIC_TAG = "(DOM )"
-UEFA_TAG = "(UEFA)"
+# The competition tags (UEFA, and later UCL / UEL / UECL) and the domestic one
+# are all shown at the same width so the badges after them start in the same
+# column. That only works inside a code span: Discord draws those monospace, so
+# equal character counts really are equal widths. The width is the longest
+# competition tag actually on the board (never under 3), and DOMESTIC is cut
+# down to fit it - DOME next to UEFA, DOM next to UCL/UEL.
+MIN_TAG_WIDTH = 3
 
 
-def league_tag(league):
-    """`(DOM )` or `(UEFA)` - which competition a fixture is in."""
+def tag_width(leagues):
+    """How many letters every tag on a board gets: the longest competition
+    code present (UEFA is 4, UCL/UEL are 3, UECL is 4), at least 3."""
+    codes = [l for l in leagues if l and l not in season.LEAGUES]
+    return max([MIN_TAG_WIDTH] + [len(c) for c in codes])
+
+
+def league_tag(league, width=MIN_TAG_WIDTH):
+    """`(DOME)`, `(UEFA)`, `(DOM)`, `(UCL)` ... - which competition a fixture
+    is in, padded or cut to `width` letters so a board's tags line up."""
     if not league:
         return ""
-    return "`{}` ".format(DOMESTIC_TAG if league in season.LEAGUES else UEFA_TAG)
+    label = "DOMESTIC" if league in season.LEAGUES else league
+    return "`({})` ".format(label[:width].ljust(width))
 
 
-def referee_board_row(fixture, slot, week, roster=()):
+def referee_board_row(fixture, slot, week, roster=(), tag_letters=MIN_TAG_WIDTH):
     """One line: league tag, two badges, kickoff, then whoever has it so far.
 
     Mentions rather than names - unlike the compact fixture board, this one
@@ -153,7 +163,7 @@ def referee_board_row(fixture, slot, week, roster=()):
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
     when = discord_time(slot_datetime(week, slot), "F")
-    tag = league_tag(fixture.get("league"))
+    tag = league_tag(fixture.get("league"), tag_letters)
     who = " ".join("<@{}>".format(r["referee_id"]) for r in roster) if roster else "_open_"
     return "{}{} *vs* {} @ {} {}".format(tag, home, away, when, who)
 
@@ -203,13 +213,14 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
             footer=footer_text,
         )]
 
+    letters = tag_width(f.get("league") for f in fixtures if f["slot_key"])
     blocks = []
     for day in sorted(by_day):
         block = ["**__{} {} {}:__**  📅".format(
             day.strftime("%A"), day.day, day.strftime("%B"))]
         for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0]):
             block.append(referee_board_row(
-                fixture, slot, week, rosters.get(fixture["id"])))
+                fixture, slot, week, rosters.get(fixture["id"]), letters))
         block.append("")
         blocks.append(block)
 

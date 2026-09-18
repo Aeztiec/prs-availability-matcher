@@ -361,12 +361,25 @@ finally:
     _season.LEAGUE_EMOJI = real_league
     _season.SEASON_EMOJI = real_season
 
-print("\nthe league tag says DOM or UEFA",)
-check("a domestic fixture is tagged DOM", league_tag("PL"), "`(DOM )` ")
-check("a UEFA fixture is tagged UEFA", league_tag("UEFA"), "`(UEFA)` ")
+print("\nthe competition tags line up, sized to the longest one on the board")
+from bot.notify import tag_width
+check("UEFA is 4 letters, so DOMESTIC is cut to DOME",
+      [league_tag(l, tag_width(["PL", "UEFA"])) for l in ("PL", "UEFA")],
+      ["`(DOME)` ", "`(UEFA)` "])
+check("UCL and UEL are 3 letters, so it is DOM",
+      [league_tag(l, tag_width(["PL", "UCL", "UEL"])) for l in ("PL", "UCL", "UEL")],
+      ["`(DOM)` ", "`(UCL)` ", "`(UEL)` "])
+check("UECL is 4 letters, so DOME again",
+      [league_tag(l, tag_width(["PL", "UECL"])) for l in ("PL", "UECL")],
+      ["`(DOME)` ", "`(UECL)` "])
+check("a shorter code beside a longer one is padded, not misaligned",
+      [league_tag(l, tag_width(["UCL", "UEFA"])) for l in ("UCL", "UEFA")],
+      ["`(UCL )` ", "`(UEFA)` "])
+check("all domestic: just DOM", league_tag("PL", tag_width(["PL", "SA"])), "`(DOM)` ")
+check("every tag on a board is the same length",
+      len({len(league_tag(l, tag_width(["PL", "UCL", "UEFA"])))
+           for l in ("PL", "UCL", "UEFA")}), 1)
 check("no league at all is just blank", league_tag(None), "")
-check("the two tags are the same width, so they line up",
-      len(league_tag("PL")), len(league_tag("UEFA")))
 
 print("\nthe deadline fields and footer stay on the last embed, even split")
 footer_store = fresh_store()
