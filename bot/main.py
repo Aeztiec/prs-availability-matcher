@@ -1340,7 +1340,7 @@ def register(bot):
     class ResultForm(discord.ui.Modal):
         """One box per section; the team boxes start filled with that club's
         players from the sheet, so staff delete who didn't play and add the
-        stats to who did."""
+        stats to who did, and Officials starts with whoever claimed the game."""
 
         def __init__(self, fixture, home_score, away_score, competition, round_name):
             super().__init__(title="Result: {} vs {}".format(
@@ -1366,7 +1366,12 @@ def register(bot):
                             placeholder="username g g a")
             self.subs = box("Subs", placeholder="username sub")
             self.motm = box("MOTM & mentions (best first, up to 4)", placeholder="username")
-            self.officials = box("Officials", placeholder="username")
+            names = {r["discord_id"]: r["name"] for r in store.referees(active_only=False)}
+            assigned = [names[r["referee_id"]]
+                        for r in store.fixture_referees(fixture["id"])
+                        if r["referee_id"] in names]
+            self.officials = box("Officials", chr(10).join(assigned),
+                                 placeholder="username")
 
         async def on_submit(self, interaction):
             text, problems = results.build(
