@@ -213,7 +213,7 @@ check("heading lists both of their fixtures",
        and "DEF FC vs GHI FC" in WEEK_TARGET.heading(multi_store, 111)), True)
 check("each fixture on its own line, not comma-packed, no fixture numbers",
       WEEK_TARGET.heading(multi_store, 111),
-      "**Your fixtures:**\nABC FC vs XYZ FC\nDEF FC vs GHI FC")
+      "**__Your fixtures:__** 📋\nABC FC vs XYZ FC\nDEF FC vs GHI FC")
 check("a single-fixture manager gets the plain vs heading, no bold header",
       WEEK_TARGET.heading(multi_store, 222), "ABC FC vs XYZ FC")
 check("only their fixtures are listed, not the other manager's",

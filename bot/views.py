@@ -98,7 +98,7 @@ class Target:
             return "No fixtures"
         if len(fixtures) == 1:
             return row(fixtures[0])
-        return "**Your fixtures:**\n" + "\n".join(row(f) for f in fixtures)
+        return "**__Your fixtures:__** 📋\n" + "\n".join(row(f) for f in fixtures)
 
     def closed(self, store, user_id):
         """Why answering is no longer possible, or None."""
