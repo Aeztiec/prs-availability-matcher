@@ -211,6 +211,9 @@ check("both list the shared manager",
 check("heading lists both of their fixtures",
       ("#1024" in WEEK_TARGET.heading(multi_store, 111)
        and "#1025" in WEEK_TARGET.heading(multi_store, 111)), True)
+check("each fixture on its own line, not comma-packed",
+      WEEK_TARGET.heading(multi_store, 111),
+      "Your fixtures:\n#1024 ABC FC vs XYZ FC\n#1025 DEF FC vs GHI FC")
 check("a single-fixture manager gets the plain #id vs heading",
       WEEK_TARGET.heading(multi_store, 222), "#1024 ABC FC vs XYZ FC")
 check("only their fixtures are listed, not the other manager's",
@@ -266,6 +269,8 @@ check("one field per day, matching the active-day resolution",
       [name for name, _, _ in embed.fields], picked_state.days)
 check("defaults to the first day, same as build_view",
       embed_day, picked_state.days[0])
+check("the footer explains that it's saved for next time",
+      "next time" in embed.footer, True)
 
 print("\na submitted state says so in the body")
 submitted_state = SelectorState(SLOTS, saved={SLOTS[0].key: 2}, submitted=True)

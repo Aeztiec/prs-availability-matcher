@@ -98,7 +98,7 @@ class Target:
             return "No fixtures"
         if len(fixtures) == 1:
             return row(fixtures[0])
-        return "Your fixtures: " + ", ".join(row(f) for f in fixtures)
+        return "Your fixtures:\n" + "\n".join(row(f) for f in fixtures)
 
     def closed(self, store, user_id):
         """Why answering is no longer possible, or None."""
@@ -155,6 +155,8 @@ def build_message(store, target, user_id, state, active_day=None):
         title="Set your availability",
         description=description,
         fields=[(day, state.day_summary(day), True) for day in state.days],
+        footer=("Saved automatically - reused as your starting point the "
+                "next time you submit."),
     )
     return embed, active_day
 

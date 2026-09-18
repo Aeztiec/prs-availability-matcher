@@ -258,6 +258,9 @@ check("day summary hides NO slots",
       SelectorState(SLOTS, saved={"sat_1800": 2}).day_summary("Saturday"), "18:00 🟢")
 check("empty day shows a dash",
       SelectorState(SLOTS, saved={"sat_1800": 2}).day_summary("Sunday"), "-")
+check("more than one pick puts each time on its own line",
+      SelectorState(SLOTS, saved={"sat_1700": 1, "sat_1800": 2}).day_summary("Saturday"),
+      "17:00 🟡\n18:00 🟢")
 
 # --------------------------------------------------------------------------
 print("")

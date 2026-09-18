@@ -96,13 +96,18 @@ class SelectorState:
 
     # ------------------------------------------------------------ rendering
     def day_summary(self, day):
-        """'17:00 🟡  18:00 🟢  19:00 🟢' for one day, or '-' if nothing set."""
+        """'17:00 🟡\\n18:00 🟢\\n19:00 🟢' for one day, or '-' if nothing set.
+
+        One time per line rather than packed onto one - a day's picks are
+        meant to be scanned as a short list, and that only reads cleanly
+        with a line break between each one.
+        """
         parts = [
             "{} {}".format(s.label, self.picks[s.key].emoji)
             for s in self.slots_for(day)
             if self.picks[s.key] != Pref.NO
         ]
-        return "  ".join(parts) if parts else "-"
+        return "\n".join(parts) if parts else "-"
 
     def button_label(self, slot):
         return "{} {}".format(self.picks[slot.key].emoji, slot.label)
