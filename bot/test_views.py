@@ -20,13 +20,14 @@ import sys
 
 import discord
 
+from bot import season
 from bot.scheduling import Pref
 from bot.selector import SelectorState
 from bot.slots import Slot, clean_day, slot_key
 from bot.views import (
     DYNAMIC_ITEMS, SCOPE_FIXTURE,
     ClearButton, DayButton, OpenButton, SlotButton, SubmitButton, Target,
-    build_view, opener,
+    build_message, build_view, opener,
 )
 
 FAILURES = []
@@ -210,8 +211,8 @@ check("both list the shared manager",
 check("heading lists both of their fixtures",
       ("#1024" in WEEK_TARGET.heading(multi_store, 111)
        and "#1025" in WEEK_TARGET.heading(multi_store, 111)), True)
-check("a single-fixture manager gets the plain #id · vs heading",
-      WEEK_TARGET.heading(multi_store, 222), "#1024 · ABC FC vs XYZ FC")
+check("a single-fixture manager gets the plain #id vs heading",
+      WEEK_TARGET.heading(multi_store, 222), "#1024 ABC FC vs XYZ FC")
 check("only their fixtures are listed, not the other manager's",
       "#1025" in WEEK_TARGET.heading(multi_store, 222), False)
 
@@ -245,6 +246,31 @@ draft_only = FakeStore(submissions={
 })
 check("still blank - a draft was never a real answer",
       Target(SCOPE_FIXTURE, NEXT_WEEK).load(draft_only, 111), ({}, False))
+
+# --------------------------------------------------------------------------
+print("\nthe selector's own message is an embed, like everything else the bot posts")
+# --------------------------------------------------------------------------
+badged_store = FakeStore(fixtures=[
+    {"id": 7, "home_team": season.team_name("AST"), "away_team": season.team_name("MCI"),
+     "home_manager_id": 111, "away_manager_id": 222,
+     "slot_key": None, "gameweek": None, "week": WEEK},
+])
+picked_state = SelectorState(SLOTS, saved={SLOTS[0].key: 2})
+embed, embed_day = build_message(badged_store, WEEK_TARGET, 111, picked_state)
+check("titled generically - the fixtures themselves are in the body",
+      embed.title, "Set your availability")
+check("real team badges render in the body, not plain names",
+      season.TEAM_EMOJI["ASTON VILLA"] in embed.description, True)
+check("the GMT/legend note is still there", "GMT+0" in embed.description, True)
+check("one field per day, matching the active-day resolution",
+      [name for name, _, _ in embed.fields], picked_state.days)
+check("defaults to the first day, same as build_view",
+      embed_day, picked_state.days[0])
+
+print("\na submitted state says so in the body")
+submitted_state = SelectorState(SLOTS, saved={SLOTS[0].key: 2}, submitted=True)
+submitted_embed, _ = build_message(badged_store, WEEK_TARGET, 111, submitted_state)
+check("submitted note appended", "Submitted" in submitted_embed.description, True)
 
 # --------------------------------------------------------------------------
 print("\nthe DM opener button")

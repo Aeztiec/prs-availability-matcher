@@ -104,9 +104,6 @@ class SelectorState:
         ]
         return "  ".join(parts) if parts else "-"
 
-    def summary_lines(self):
-        return ["**{}** · {}".format(day, self.day_summary(day)) for day in self.days]
-
     def button_label(self, slot):
         return "{} {}".format(self.picks[slot.key].emoji, slot.label)
 

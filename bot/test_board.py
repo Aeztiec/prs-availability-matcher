@@ -264,13 +264,14 @@ check("its own embed, titled for the managers",
       cta.title, "Managers, submit your timings")
 check("names the gameweek", "Gameweek 1" in cta.description, True)
 check("says it opens privately", "privately" in cta.description, True)
-check("the legend is its own field, not buried in a sentence",
-      cta.fields[0][0], "Legend")
-check("explains what the legend is for", "mark each time slot" in cta.fields[0][1], True)
+check("the legend explains itself, bolded rather than a separate field",
+      "**How to mark each time slot:**" in cta.description, True)
 check("explains the three states",
-      all(w in cta.fields[0][1] for w in ("No", "Fine", "Ideal")), True)
-check("the deadline is its own field", cta.fields[1][0], "Deadline")
-check("stated as a localised timestamp", "<t:" in cta.fields[1][1], True)
+      all(w in cta.description for w in ("No", "Fine", "Ideal")), True)
+check("no more standalone Legend field",
+      any(name == "Legend" for name, _, _ in cta.fields), False)
+check("the deadline is the only field", cta.fields[0][0], "Deadline")
+check("stated as a localised timestamp", "<t:" in cta.fields[0][1], True)
 check("tells a non-manager what to do, in the footer",
       "Contact an Official" in cta.footer, True)
 check("fits an embed's limit", len(cta.description) <= EMBED_DESC_LIMIT, True)

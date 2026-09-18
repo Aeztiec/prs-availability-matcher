@@ -11,10 +11,19 @@ from __future__ import annotations
 
 import discord
 
-from . import referees
+from . import referees, season
 from .weeks import slot_datetime
 
 MAX_OPTIONS = 25  # Discord's cap on a single select menu
+
+
+def _tag(team_name):
+    """A team's short code, colon-wrapped - a select option's label is plain
+    text, so the real badge emoji (which renders fine in an embed) would
+    just show as unresolved gibberish here. A code without one falls back
+    to the full name rather than disappearing."""
+    code = season.team_code(team_name)
+    return ":{}:".format(code) if code else team_name
 
 
 def claim_options(pending, slot_for, week):
@@ -30,7 +39,7 @@ def claim_options(pending, slot_for, week):
         slot = slot_for(fixture["slot_key"])
         role = referees.next_open_role([r["role"] for r in roster])
         label = "#{} {} vs {} - {} ({} open)".format(
-            fixture["id"], fixture["home_team"], fixture["away_team"],
+            fixture["id"], _tag(fixture["home_team"]), _tag(fixture["away_team"]),
             slot.label, referees.ROLE_LABEL[role].capitalize(),
         )
         options.append(discord.SelectOption(label=label[:100], value=str(fixture["id"])))

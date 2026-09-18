@@ -331,6 +331,17 @@ def team_name(code):
     return name
 
 
+# The reverse of TEAM_CODES - a team's sheet name back to its shorthand, for
+# spots that can't render the real badge emoji (a Discord select option's
+# label is plain text, unlike an embed) but still need something shorter and
+# more scannable than the full name.
+CODE_FOR_TEAM = {name: code for code, name in TEAM_CODES.items()}
+
+
+def team_code(name):
+    return CODE_FOR_TEAM.get(name)
+
+
 def validate(sheet_team_names):
     """Check every code and fixture against the timings sheet.
 

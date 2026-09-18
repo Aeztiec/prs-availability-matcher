@@ -14,6 +14,7 @@ import sys
 
 from bot.ref_views import REF_DYNAMIC_ITEMS, ClaimSelect, MAX_OPTIONS, claim_options
 from bot.slots import Slot, clean_day, slot_key
+from bot import season
 
 FAILURES = []
 
@@ -76,6 +77,18 @@ empty_options, empty_disabled = claim_options([], slot_for, WEEK)
 check("one placeholder option", len(empty_options), 1)
 check("disabled so it can't be picked", empty_disabled, True)
 check("placeholder value is the sentinel", empty_options[0].value, "none")
+
+print("\na real team shows its short code, not the full sheet name")
+real = [(fixture(5, SAT_1800.key, season.team_name("FRA"), season.team_name("RBL")), [])]
+real_options, _ = claim_options(real, slot_for, WEEK)
+check("colon-wrapped codes, not the full names",
+      ":FRA: vs :RBL:" in real_options[0].label, True)
+check("the full sheet names are gone from the label",
+      "EINTRACHT" not in real_options[0].label, True)
+
+print("\na team with no known code just keeps its name")
+check("unmapped team falls back to its full name",
+      "ABC FC vs XYZ FC" in options[0].label, True)
 
 print("\nmore than 25 open games is capped, not rejected")
 many = [(fixture(100 + n, SAT_1800.key), []) for n in range(30)]

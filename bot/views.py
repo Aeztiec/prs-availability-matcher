@@ -17,6 +17,7 @@ import re
 
 import discord
 
+from . import notify, season
 from .selector import SelectorState, describe_choice
 
 # --------------------------------------------------------------------------
@@ -88,16 +89,16 @@ class Target:
         return bool(self._my_fixtures(store, user_id, open_only=False))
 
     def heading(self, store, user_id):
+        def row(f):
+            return "#{} {} vs {}".format(
+                f["id"], season.label_for(f["home_team"]), season.label_for(f["away_team"]))
+
         fixtures = self._my_fixtures(store, user_id)
         if not fixtures:
             return "No fixtures"
         if len(fixtures) == 1:
-            f = fixtures[0]
-            return "#{} · {} vs {}".format(f["id"], f["home_team"], f["away_team"])
-        return "Your fixtures: " + ", ".join(
-            "#{} {} vs {}".format(f["id"], f["home_team"], f["away_team"])
-            for f in fixtures
-        )
+            return row(fixtures[0])
+        return "Your fixtures: " + ", ".join(row(f) for f in fixtures)
 
     def closed(self, store, user_id):
         """Why answering is no longer possible, or None."""
@@ -120,24 +121,43 @@ class Target:
 LEGEND = "⚪ no  ·  🟡 fine  ·  🟢 ideal (click a time to cycle it)"
 
 
+def _discord_embed(board_embed):
+    """Turn a notify.BoardEmbed into the real discord.Embed the API wants.
+
+    Duplicates main.py's helper of the same name rather than importing it -
+    main.py imports this module, so the reverse import would cycle.
+    """
+    color = board_embed.color if board_embed.color is not None else season.EMBED_COLOR
+    embed = discord.Embed(description=board_embed.description,
+                          color=discord.Color(color))
+    if board_embed.title:
+        embed.title = board_embed.title
+    if board_embed.footer:
+        embed.set_footer(text=board_embed.footer)
+    for name, value, inline in board_embed.fields:
+        embed.add_field(name=name, value=value, inline=inline)
+    return embed
+
+
 def _resolve_active_day(state, active_day):
     days = state.days
     return active_day if active_day in days else (days[0] if days else None)
 
 
 def build_message(store, target, user_id, state, active_day=None):
-    """The text shown above the buttons."""
+    """The embed shown above the buttons - one field per day, so the current
+    picks read as a compact row of cards rather than a wall of plain text."""
     active_day = _resolve_active_day(state, active_day)
-    lines = [
-        "**{}**".format(target.heading(store, user_id)),
-        "",
-        "All times are **GMT+0**. {}".format(LEGEND),
-        "",
-    ]
-    lines += state.summary_lines()
+    description = "{}\n\nAll times are **GMT+0**. {}".format(
+        target.heading(store, user_id), LEGEND)
     if state.submitted:
-        lines += ["", "✅ Submitted. You can still change it until the deadline."]
-    return "\n".join(lines), active_day
+        description += "\n\n✅ Submitted. You can still change it until the deadline."
+    embed = notify.BoardEmbed(
+        title="Set your availability",
+        description=description,
+        fields=[(day, state.day_summary(day), True) for day in state.days],
+    )
+    return embed, active_day
 
 
 def build_view(target, state, active_day=None):
@@ -165,18 +185,19 @@ def build_view(target, state, active_day=None):
 
 
 async def refresh(interaction, store, target, state, active_day=None):
-    content, active_day = build_message(store, target, interaction.user.id, state, active_day)
+    embed, active_day = build_message(store, target, interaction.user.id, state, active_day)
     view, _ = build_view(target, state, active_day)
-    await interaction.response.edit_message(content=content, view=view)
+    await interaction.response.edit_message(embed=_discord_embed(embed), view=view)
 
 
 async def open_selector(interaction, store, target, slots, ephemeral=True):
     """First render, in response to a command or a DM button."""
     saved, submitted = target.load(store, interaction.user.id)
     state = SelectorState(slots, saved=saved, submitted=submitted)
-    content, active_day = build_message(store, target, interaction.user.id, state)
+    embed, active_day = build_message(store, target, interaction.user.id, state)
     view, _ = build_view(target, state, active_day)
-    await interaction.response.send_message(content=content, view=view, ephemeral=ephemeral)
+    await interaction.response.send_message(embed=_discord_embed(embed), view=view,
+                                            ephemeral=ephemeral)
 
 
 # --------------------------------------------------------------------------

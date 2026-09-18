@@ -384,13 +384,12 @@ def availability_call_to_action(gameweek, deadline):
             "Use the button below to submit the times **{}** works for "
             "your team. The selector opens privately, so only you can see "
             "your responses.\n\n"
+            "**How to mark each time slot:** ⚪ No · 🟡 Fine · 🟢 Ideal\n\n"
             "Once both managers have responded, the best mutually available "
             "time is selected automatically and the fixture list above "
             "updates."
         ).format(gameweek.label),
         fields=[
-            ("Legend", "How to mark each time slot in the selector:\n"
-                      "⚪ No · 🟡 Fine · 🟢 Ideal", False),
             ("Deadline", discord_time(deadline, "F"), False),
         ],
         footer=("If you have nothing to submit, your gameweek may not be "
