@@ -1390,7 +1390,7 @@ def register(bot):
             self.officials = box("Officiating team", chr(10).join(crew),
                                  "username - Main Referee [Full 90']")
             self.pens = discord.ui.TextInput(
-                label="Penalty shootout score (only if there was one)",
+                label="Penalty shootout score (if any)",
                 style=discord.TextStyle.short, required=False, max_length=10,
                 placeholder="5 - 4")
             self.add_item(self.pens)
