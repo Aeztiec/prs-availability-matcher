@@ -102,20 +102,13 @@ def tag_width(leagues):
     return max([MIN_TAG_WIDTH] + [len(c) for c in codes])
 
 
-def league_tag(league, width=MIN_TAG_WIDTH, logo=False):
+def league_tag(league, width=MIN_TAG_WIDTH):
     """`(DOME)`, `(UEFA)`, `(DOM)`, `(UCL)` ... - which competition a fixture
-    is in, padded or cut to `width` letters so a board's tags line up.
-
-    With logo=True the competition's badge follows the tag (the UEFA logo, or
-    the fixture's own league). Every row gets one, so the badges after it
-    still start in the same place. Outside the code span, since custom emoji
-    do not render inside backticks."""
+    is in, padded or cut to `width` letters so a board's tags line up."""
     if not league:
         return ""
     label = "DOMESTIC" if league in season.LEAGUES else league
-    tag = "`({})` ".format(label[:width].ljust(width))
-    badge = season.competition_emoji(league) if logo else ""
-    return tag + badge + " " if badge else tag
+    return "`({})` ".format(label[:width].ljust(width))
 
 
 def referee_board_row(fixture, slot, week, roster=(), tag_letters=MIN_TAG_WIDTH):

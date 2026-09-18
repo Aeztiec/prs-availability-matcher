@@ -90,7 +90,7 @@ class Target:
 
     def heading(self, store, user_id):
         def row(f):
-            tag = notify.league_tag(f.get("league"), letters, logo=True)
+            tag = notify.league_tag(f.get("league"), letters)
             return "{}{} vs {}".format(
                 tag, season.label_for(f["home_team"]), season.label_for(f["away_team"]))
 

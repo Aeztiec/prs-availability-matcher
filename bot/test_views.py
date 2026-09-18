@@ -220,8 +220,6 @@ check("only their fixtures are listed, not the other manager's",
       "DEF FC" in WEEK_TARGET.heading(multi_store, 222), False)
 
 print("\neach row carries a DOM/UEFA tag, same as the referee board")
-from bot import season as season_module
-
 tagged_store = FakeStore(fixtures=[
     {"id": 1024, "home_team": "ABC FC", "away_team": "XYZ FC", "league": "PL",
      "home_manager_id": 111, "away_manager_id": 222,
@@ -231,17 +229,8 @@ tagged_store = FakeStore(fixtures=[
      "slot_key": None, "gameweek": None, "week": WEEK},
 ])
 tagged_heading = WEEK_TARGET.heading(tagged_store, 111)
-uefa_store = FakeStore(fixtures=[
-    {"id": 1030, "home_team": "ABC FC", "away_team": "XYZ FC", "league": "UEFA",
-     "home_manager_id": 111, "away_manager_id": 222,
-     "slot_key": None, "gameweek": None, "week": WEEK},
-])
 check("a domestic league gets tagged DOM",
-      "`(DOM)` {} ABC FC vs XYZ FC".format(
-          season_module.LEAGUE_EMOJI["PL"]) in tagged_heading, True)
-check("a UEFA fixture shows the UEFA logo after its tag",
-      "`(UEFA)` {} ".format(season_module.UEFA_TAG_EMOJI)
-      in WEEK_TARGET.heading(uefa_store, 111), True)
+      "`(DOM)` ABC FC vs XYZ FC" in tagged_heading, True)
 check("a competition fixture is tagged with its own code",
       "`(UCL)` DEF FC vs GHI FC" in tagged_heading, True)
 check("a fixture with no league at all gets no tag",
