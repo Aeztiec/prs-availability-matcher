@@ -1363,12 +1363,13 @@ def register(bot):
         players from the sheet and Officials with whoever claimed the game, so
         staff delete and add rather than type everything."""
 
-        def __init__(self, fixture, home_score, away_score):
+        def __init__(self, fixture, home_score, away_score, pens):
             super().__init__(title="Result: {} vs {}".format(
                 season.team_code(fixture["home_team"]) or "HOME",
                 season.team_code(fixture["away_team"]) or "AWAY")[:45])
             self.fixture = fixture
             self.scores = (home_score, away_score)
+            self.pens = pens
 
             def box(label, default="", placeholder=None):
                 item = discord.ui.TextInput(
@@ -1389,27 +1390,12 @@ def register(bot):
                     if r["referee_id"] in names]
             self.officials = box("Officiating team", chr(10).join(crew),
                                  "username - Main Referee [Full 90']")
-            self.pens = discord.ui.TextInput(
-                label="Penalty shootout score (if any)",
-                style=discord.TextStyle.short, required=False, max_length=10,
-                placeholder="5 - 4")
-            self.add_item(self.pens)
 
         async def on_submit(self, interaction):
-            shootout = self.pens.value.strip()
-            pens = re.fullmatch(r"(\d{1,2})\s*[-:]\s*(\d{1,2})", shootout) if shootout else None
-            if shootout and not pens:
-                await interaction.response.send_message(
-                    embed=_discord_embed(notify.BoardEmbed(
-                        title="Fix these first",
-                        description="The penalty shootout score should look like 5 - 4.",
-                        footer="Nothing was posted. Run /result again.")),
-                    ephemeral=True)
-                return
             text, problems = results.build(
                 self.fixture, self.scores[0], self.scores[1], self.home.value,
                 self.away.value, self.motm.value, self.officials.value, players,
-                pens=pens.groups() if pens else None)
+                pens=self.pens)
             if problems:
                 await interaction.response.send_message(
                     embed=_discord_embed(notify.BoardEmbed(
@@ -1431,12 +1417,20 @@ def register(bot):
         game="The game - pick from the list as you type",
         home_score="Home team's goals",
         away_score="Away team's goals",
+        home_pens="Home team's penalty shootout goals, if there was one",
+        away_pens="Away team's penalty shootout goals, if there was one",
     )
     @staff_only()
     async def result(interaction, game: str, home_score: app_commands.Range[int, 0, 99],
-                     away_score: app_commands.Range[int, 0, 99]):
+                     away_score: app_commands.Range[int, 0, 99],
+                     home_pens: app_commands.Range[int, 0, 99] = None,
+                     away_pens: app_commands.Range[int, 0, 99] = None):
         record = await resolve_game(interaction, game)
         if record is None:
+            return
+        if (home_pens is None) != (away_pens is None):
+            await interaction.response.send_message(
+                "Give both penalty scores, or neither.", ephemeral=True)
             return
         if not players.rows:
             await interaction.response.send_message(
@@ -1444,7 +1438,8 @@ def register(bot):
                 "usernames.", ephemeral=True)
             return
         await interaction.response.send_modal(
-            ResultForm(record, home_score, away_score))
+            ResultForm(record, home_score, away_score,
+                       None if home_pens is None else (home_pens, away_pens)))
 
     result.autocomplete("game")(game_autocomplete())
 
