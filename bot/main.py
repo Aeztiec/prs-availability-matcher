@@ -21,13 +21,14 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-from . import config, notify, referees, season
+from . import config, notify, referees, results, season
 from .db import Store
 from .ref_views import (
     REF_DYNAMIC_ITEMS, ClaimSelect, claim_options, game_name, matchup, staff_game_name,
 )
 from .text import plural
 from .fallback import Timings
+from .players import Players
 from .orchestrator import Action, dashboard, run_once, run_once_randomly
 from .scheduling import Status
 from .selector import fits_on_one_message, SelectorState
@@ -1332,6 +1333,86 @@ def register(bot):
                    len(outcomes), week, interaction.user)
         await bot.process(week=week)
         await bot.show_dashboard(interaction, week, followup=True)
+
+    # ----------------------------------------------------------------- result
+    players = Players.load()
+
+    class ResultForm(discord.ui.Modal):
+        """One box per section; the team boxes start filled with that club's
+        players from the sheet, so staff delete who didn't play and add the
+        stats to who did."""
+
+        def __init__(self, fixture, home_score, away_score, competition, round_name):
+            super().__init__(title="Result: {} vs {}".format(
+                season.team_code(fixture["home_team"]) or "HOME",
+                season.team_code(fixture["away_team"]) or "AWAY")[:45])
+            self.fixture = fixture
+            self.scores = (home_score, away_score)
+            self.competition = competition
+            self.round_name = round_name
+
+            def box(label, default="", required=False, placeholder=None):
+                item = discord.ui.TextInput(
+                    label=label[:45], style=discord.TextStyle.paragraph, default=default[:4000],
+                    required=required, max_length=4000, placeholder=placeholder)
+                self.add_item(item)
+                return item
+
+            self.home = box("{} stats".format(fixture["home_team"].title()),
+                            chr(10).join(players.roster(fixture["home_team"])),
+                            placeholder="username g g a")
+            self.away = box("{} stats".format(fixture["away_team"].title()),
+                            chr(10).join(players.roster(fixture["away_team"])),
+                            placeholder="username g g a")
+            self.subs = box("Subs", placeholder="username sub")
+            self.motm = box("MOTM & mentions (best first, up to 4)", placeholder="username")
+            self.officials = box("Officials", placeholder="username")
+
+        async def on_submit(self, interaction):
+            text, problems = results.build(
+                self.fixture, self.scores[0], self.scores[1], self.home.value,
+                self.away.value, self.subs.value, self.motm.value,
+                self.officials.value, players, self.competition, self.round_name)
+            if problems:
+                await interaction.response.send_message(
+                    embed=_discord_embed(notify.BoardEmbed(
+                        title="Fix these first",
+                        description=chr(10).join(problems),
+                        footer="Nothing was posted. Run /result again.")),
+                    ephemeral=True)
+                return
+            posted = await bot.post(
+                interaction.channel,
+                embed=_discord_embed(notify.BoardEmbed(description=text)),
+                mention_users=False)
+            await interaction.response.send_message(
+                "Result posted." if posted else
+                "⚠️ Couldn't post here. Check my permissions.", ephemeral=True)
+
+    @tree.command(name="result", description="Post a finished game's result")
+    @app_commands.describe(
+        game="The game - pick from the list as you type",
+        home_score="Home team's goals",
+        away_score="Away team's goals",
+        competition="Shown in the heading if not the league (e.g. UCL)",
+        round="Shown in the heading if not the gameweek (e.g. Round of 16 Leg 1)",
+    )
+    @staff_only()
+    async def result(interaction, game: str, home_score: app_commands.Range[int, 0, 99],
+                     away_score: app_commands.Range[int, 0, 99],
+                     competition: str = None, round: str = None):
+        record = await resolve_game(interaction, game)
+        if record is None:
+            return
+        if not players.rows:
+            await interaction.response.send_message(
+                "The player sheet (data/players.csv) is missing, so I can't check "
+                "usernames.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            ResultForm(record, home_score, away_score, competition, round))
+
+    result.autocomplete("game")(game_autocomplete())
 
     tree.add_command(gw_group)
     tree.add_command(managers_group)

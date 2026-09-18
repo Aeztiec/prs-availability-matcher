@@ -8,3 +8,6 @@ __pycache__/
 .env
 *.db
 *.sqlite3
+
+# The player sheet has Roblox user IDs and wages - never commit it to a public repo.
+data/players.csv
