@@ -132,17 +132,24 @@ LEAGUE_TAG_WIDTH = len("UEFA")
 
 
 def league_tag(league):
-    """(DOM) or (UEFA), same width either way.
+    """A marker for which competition a fixture belongs to - the configured
+    emoji if one has been uploaded (season.DOMESTIC_TAG_EMOJI /
+    UEFA_TAG_EMOJI), otherwise a padded (DOM)/(UEFA) text tag.
 
     Discord doesn't render ordinary text in monospace, so two labels of
     different lengths would push each row's badges to a different starting
     point. Padding the word to a fixed width inside a backtick span keeps
-    every row lined up regardless of which one it is. Shared across the
+    every row lined up regardless of which one it is - the emoji form has no
+    such problem, being a single glyph either way. Shared across the
     referee board and the availability selector, not just the one place.
     """
     if not league:
         return ""
-    label = "DOM" if league in season.LEAGUES else "UEFA"
+    domestic = league in season.LEAGUES
+    emoji = season.DOMESTIC_TAG_EMOJI if domestic else season.UEFA_TAG_EMOJI
+    if season.usable_emoji(emoji):
+        return "{} ".format(emoji)
+    label = "DOM" if domestic else "UEFA"
     return "`({})` ".format(label.center(LEAGUE_TAG_WIDTH))
 
 

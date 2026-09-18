@@ -17,7 +17,7 @@ import tempfile
 
 import bot.notify as notify_module
 from bot.db import Store
-from bot.notify import board_digest, board_row, dashboard_summary, fixture_board
+from bot.notify import board_digest, board_row, dashboard_summary, fixture_board, league_tag
 from bot.orchestrator import dashboard
 from bot.scheduling import Source, Status
 from bot.slots import Slot, clean_day, slot_key
@@ -357,6 +357,25 @@ try:
 finally:
     _season.LEAGUE_EMOJI = real_league
     _season.SEASON_EMOJI = real_season
+
+print("\nthe DOM/UEFA tag switches to an emoji once one is uploaded")
+check("blank by default - the text tag, not a stray space or crash",
+      league_tag("PL"), "`(DOM )` ")
+check("no league at all is just blank", league_tag(None), "")
+real_domestic_tag = _season.DOMESTIC_TAG_EMOJI
+real_uefa_tag = _season.UEFA_TAG_EMOJI
+_season.DOMESTIC_TAG_EMOJI = "<:DOM:111>"
+_season.UEFA_TAG_EMOJI = "<:UCL:222>"
+try:
+    check("a configured domestic emoji replaces the text tag",
+          league_tag("PL"), "<:DOM:111> ")
+    check("a configured UEFA emoji replaces the text tag",
+          league_tag("UEFA"), "<:UCL:222> ")
+finally:
+    _season.DOMESTIC_TAG_EMOJI = real_domestic_tag
+    _season.UEFA_TAG_EMOJI = real_uefa_tag
+check("restored to the text tag once unset",
+      league_tag("UEFA"), "`(UEFA)` ")
 
 print("\nthe deadline fields and footer stay on the last embed, even split")
 footer_store = fresh_store()
