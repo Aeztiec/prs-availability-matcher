@@ -106,15 +106,30 @@ class FakeStore:
     """A manager's fixtures for one week - Target now resolves everything
     (may_answer, closed, heading) against this instead of a single fixture."""
 
-    def __init__(self, fixtures=None):
+    def __init__(self, fixtures=None, submissions=None):
         self._fixtures = fixtures if fixtures is not None else [
             {"id": 1024, "home_team": "ABC FC", "away_team": "XYZ FC",
              "home_manager_id": 111, "away_manager_id": 222,
              "slot_key": None, "gameweek": None, "week": WEEK},
         ]
+        # {(week, manager_id): {"slots": {...}, "submitted": bool}}
+        self._submissions = submissions or {}
 
     def fixtures(self, week=None):
         return [f for f in self._fixtures if week is None or f["week"] == week]
+
+    def weekly_submission(self, week, manager_id):
+        return self._submissions.get((week, manager_id))
+
+    def latest_weekly_submission(self, manager_id, before_week=None):
+        candidates = [
+            (w, record) for (w, mid), record in self._submissions.items()
+            if mid == manager_id and record.get("submitted")
+            and (before_week is None or w < before_week)
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda pair: pair[0])[1]
 
 
 state = SelectorState(SLOTS)
@@ -199,6 +214,37 @@ check("a single-fixture manager gets the plain #id · vs heading",
       WEEK_TARGET.heading(multi_store, 222), "#1024 · ABC FC vs XYZ FC")
 check("only their fixtures are listed, not the other manager's",
       "#1025" in WEEK_TARGET.heading(multi_store, 222), False)
+
+# --------------------------------------------------------------------------
+print("\na fresh week carries forward the manager's last submitted picks")
+# --------------------------------------------------------------------------
+PREV_WEEK, NEXT_WEEK = "2026-09-12", "2026-09-26"
+carried = {SLOTS[0].key: 2, SLOTS[1].key: 1}
+history_store = FakeStore(submissions={
+    (PREV_WEEK, 111): {"slots": carried, "submitted": True},
+})
+picks, submitted = Target(SCOPE_FIXTURE, NEXT_WEEK).load(history_store, 111)
+check("the new week starts from what they last submitted", picks, carried)
+check("but is not itself marked submitted - it's a starting point", submitted, False)
+
+check("a manager with no history yet starts blank",
+      Target(SCOPE_FIXTURE, NEXT_WEEK).load(history_store, 999), ({}, False))
+
+print("\nthis week's own submission always wins over an older one")
+current_and_history = FakeStore(submissions={
+    (PREV_WEEK, 111): {"slots": carried, "submitted": True},
+    (WEEK, 111): {"slots": {SLOTS[2].key: 2}, "submitted": True},
+})
+this_week_picks, this_week_submitted = WEEK_TARGET.load(current_and_history, 111)
+check("this week's own picks, not carried forward", this_week_picks, {SLOTS[2].key: 2})
+check("and it reports as actually submitted", this_week_submitted, True)
+
+print("\nan unsubmitted draft from before is never carried forward")
+draft_only = FakeStore(submissions={
+    (PREV_WEEK, 111): {"slots": carried, "submitted": False},
+})
+check("still blank - a draft was never a real answer",
+      Target(SCOPE_FIXTURE, NEXT_WEEK).load(draft_only, 111), ({}, False))
 
 # --------------------------------------------------------------------------
 print("\nthe DM opener button")

@@ -389,7 +389,8 @@ def availability_call_to_action(gameweek, deadline):
             "updates."
         ).format(gameweek.label),
         fields=[
-            ("Legend", "⚪ No · 🟡 Fine · 🟢 Ideal", False),
+            ("Legend", "How to mark each time slot in the selector:\n"
+                      "⚪ No · 🟡 Fine · 🟢 Ideal", False),
             ("Deadline", discord_time(deadline, "F"), False),
         ],
         footer=("If you have nothing to submit, your gameweek may not be "

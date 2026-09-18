@@ -239,6 +239,31 @@ class Store:
         record["slots"] = json.loads(record["slots"])
         return record
 
+    def latest_weekly_submission(self, manager_id, before_week=None):
+        """This manager's most recent submitted week, to prefill a fresh
+        week's selector with.
+
+        A manager's availability rarely changes week to week, so opening a
+        selector that has nothing saved yet for the new week falls back to
+        whatever they last actually submitted - one click confirms it again
+        instead of re-entering every slot from scratch. Only ever reads a
+        submitted answer, never an abandoned in-progress draft. Week keys
+        sort correctly as text (they're ISO dates), so ORDER BY is enough.
+        """
+        sql = "SELECT * FROM weekly_submissions WHERE manager_id=? AND submitted=1"
+        args = [manager_id]
+        if before_week is not None:
+            sql += " AND week<?"
+            args.append(before_week)
+        sql += " ORDER BY week DESC LIMIT 1"
+        with self._connect() as conn:
+            row = conn.execute(sql, args).fetchone()
+        if not row:
+            return None
+        record = dict(row)
+        record["slots"] = json.loads(record["slots"])
+        return record
+
     def save_weekly_submission(self, week, manager_id, slots, submitted=False):
         """Upsert a manager's picks for a week. Called on every button click,
         so it must stay cheap and must not clobber the `submitted` flag by

@@ -116,6 +116,23 @@ check("fixture updated", store.fixture(fid)["slot_key"], "sat_1800")
 check("source recorded", store.fixture(fid)["schedule_source"], Source.MANAGER_PREFERENCES)
 
 # --------------------------------------------------------------------------
+print("\na later week can carry forward a manager's last submitted picks")
+# --------------------------------------------------------------------------
+NEXT_WEEK = "2026-09-19"
+check("nothing to carry forward before they've ever submitted",
+      store.latest_weekly_submission(999, before_week=NEXT_WEEK), None)
+check("the most recent submitted week comes back",
+      store.latest_weekly_submission(111, before_week=NEXT_WEEK)["slots"],
+      store.weekly_submission(WEEK, 111)["slots"])
+check("nothing earlier than their only submission",
+      store.latest_weekly_submission(111, before_week=WEEK), None)
+
+unsubmitted_only = SelectorState(SLOTS, saved={"sat_1700": 1})
+store.save_weekly_submission(NEXT_WEEK, 333, unsubmitted_only.as_dict())   # never submitted
+check("a saved-but-not-submitted draft is not offered as a carry-forward",
+      store.latest_weekly_submission(333, before_week="2026-09-26"), None)
+
+# --------------------------------------------------------------------------
 print("\nconflict context for the engine")
 # --------------------------------------------------------------------------
 check("slot load counts the scheduled fixture", store.slot_load(WEEK), {"sat_1800": 1})

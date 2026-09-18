@@ -65,9 +65,16 @@ class Target:
 
     def load(self, store, user_id):
         record = store.weekly_submission(self.ref, user_id)
-        if not record:
-            return {}, False
-        return record["slots"], bool(record["submitted"])
+        if record:
+            return record["slots"], bool(record["submitted"])
+        # Nothing saved for this week yet - start from whatever they last
+        # submitted instead of a blank selector. Never comes back as already
+        # submitted: it's a starting point to confirm or adjust, not an
+        # answer for this week until they press Submit again.
+        previous = store.latest_weekly_submission(user_id, before_week=self.ref)
+        if previous:
+            return previous["slots"], False
+        return {}, False
 
     def save(self, store, user_id, picks, submitted=False):
         store.save_weekly_submission(self.ref, user_id, picks, submitted=submitted)
