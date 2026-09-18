@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS weekly_submissions (
 CREATE TABLE IF NOT EXISTS referees (
     discord_id  INTEGER PRIMARY KEY,
     name        TEXT    NOT NULL,
-    active      INTEGER NOT NULL DEFAULT 1
+    active      INTEGER NOT NULL DEFAULT 1,
+    tier        INTEGER NOT NULL DEFAULT 1
 );
 
 -- First-come-first-served officiating. A fixture takes at most one REF claim
@@ -146,6 +147,9 @@ class Store:
             conn.execute("ALTER TABLE fixtures ADD COLUMN gameweek TEXT")
         if "league" not in columns:
             conn.execute("ALTER TABLE fixtures ADD COLUMN league TEXT")
+        ref_columns = {r["name"] for r in conn.execute("PRAGMA table_info(referees)")}
+        if "tier" not in ref_columns:
+            conn.execute("ALTER TABLE referees ADD COLUMN tier INTEGER NOT NULL DEFAULT 1")
         board_columns = {r["name"] for r in conn.execute("PRAGMA table_info(boards)")}
         if "message_ids" not in board_columns:
             conn.execute("ALTER TABLE boards ADD COLUMN message_ids TEXT")
@@ -304,13 +308,20 @@ class Store:
         )
 
     # ----------------------------------------------------------- referees
-    def add_referee(self, discord_id, name):
+    def add_referee(self, discord_id, name, tier=None):
+        """Register (or re-activate) a referee. A new one starts at tier 1; an
+        existing one keeps their tier unless one is given."""
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO referees (discord_id, name) VALUES (?,?)
-                   ON CONFLICT(discord_id) DO UPDATE SET name=excluded.name, active=1""",
-                (discord_id, name),
+                """INSERT INTO referees (discord_id, name, tier) VALUES (?,?,?)
+                   ON CONFLICT(discord_id) DO UPDATE SET name=excluded.name, active=1,
+                   tier=COALESCE(?, tier)""",
+                (discord_id, name, tier or 1, tier),
             )
+
+    def set_referee_tier(self, discord_id, tier):
+        with self._connect() as conn:
+            conn.execute("UPDATE referees SET tier=? WHERE discord_id=?", (tier, discord_id))
 
     def set_referee_active(self, discord_id, active):
         with self._connect() as conn:

@@ -42,6 +42,8 @@ from .weeks import (
 
 log = logging.getLogger("prsbot")
 
+MAX_TIER = 5   # referee tiers run 1..MAX_TIER; they will limit which games a referee can take
+
 
 def _discord_embed(board_embed):
     """Turn a notify.BoardEmbed - plain, testable data - into the real
@@ -877,13 +879,19 @@ def register(bot):
 
     # ------------------------------------------------------------ referees
     @refs_group.command(name="register", description="Register a referee, or deactivate one")
-    @app_commands.describe(active="False deactivates them instead of registering")
+    @app_commands.describe(
+        active="False deactivates them instead of registering",
+        tier="Their referee tier (new referees start at 1)",
+    )
     @staff_only()
-    async def refs_register(interaction, user: discord.User, active: bool = True):
+    async def refs_register(interaction, user: discord.User, active: bool = True,
+                            tier: app_commands.Range[int, 1, MAX_TIER] = None):
         if active:
-            store.add_referee(user.id, user.display_name)
+            store.add_referee(user.id, user.display_name, tier)
+            current = next(r["tier"] for r in store.referees() if r["discord_id"] == user.id)
             await interaction.response.send_message(
-                "{} registered as a referee.".format(user.mention), ephemeral=True
+                "{} registered as a referee (Tier {}).".format(user.mention, current),
+                ephemeral=True,
             )
         else:
             store.set_referee_active(user.id, False)
@@ -891,22 +899,36 @@ def register(bot):
                 "{} deactivated.".format(user.mention), ephemeral=True
             )
 
-    @refs_group.command(name="list", description="Registered referees and their load")
+    @refs_group.command(name="tier", description="Change a referee's tier")
+    @app_commands.describe(user="The referee", tier="Their new tier")
     @staff_only()
-    async def refs_list(interaction, week: str = None):
-        week = week or bot.current_week()
-        workload = store.ref_workload(week)
+    async def refs_tier(interaction, user: discord.User,
+                        tier: app_commands.Range[int, 1, MAX_TIER]):
+        if not store.is_active_referee(user.id):
+            await interaction.response.send_message(
+                "{} isn't a registered referee. Add them with `/refs register`.".format(
+                    user.mention), ephemeral=True)
+            return
+        store.set_referee_tier(user.id, tier)
+        await interaction.response.send_message(
+            "{} is now **Tier {}**.".format(user.mention, tier), ephemeral=True)
+
+    @refs_group.command(name="list", description="Registered referees by tier")
+    @staff_only()
+    async def refs_list(interaction):
         rows = store.referees()
         if not rows:
             await interaction.response.send_message(
                 "No referees registered. Add one with `/refs register`.", ephemeral=True
             )
             return
-        lines = ["<@{}>: {}".format(
-            ref["discord_id"], plural(workload.get(ref["discord_id"], 0), "game"))
-            for ref in rows]
+        sections = []
+        for tier in sorted({r["tier"] for r in rows}):
+            names = ["{} - <@{}>".format(season.SEASON_EMOJI, r["discord_id"])
+                     for r in rows if r["tier"] == tier]
+            sections.append("__**Tier {}:**__".format(tier) + chr(10) + chr(10).join(names))
         embed = notify.BoardEmbed(
-            title="Referees: week of {}".format(week), description="\n".join(lines))
+            title="Referees", description=(chr(10) * 2).join(sections))
         await interaction.response.send_message(embed=_discord_embed(embed), ephemeral=True)
 
     @refs_group.command(name="assign", description="Assign a referee by hand")
@@ -1257,22 +1279,38 @@ def register(bot):
             "{} manages **{}**.".format(user.mention, resolved), ephemeral=True
         )
 
-    @managers_group.command(name="list", description="Which teams still have no manager")
+    @managers_group.command(name="list", description="Every team and its manager")
     @staff_only()
-    async def managers_list(interaction, missing_only: bool = True):
+    async def managers_list(interaction, missing_only: bool = False):
         known = store.managers()
-        lines = []
-        for code, name in sorted(season.TEAM_CODES.items(), key=lambda kv: kv[1]):
-            who = known.get(name)
-            if missing_only and who:
-                continue
-            lines.append("`{:<3}` {}: {}".format(
-                code, name, "<@{}>".format(who) if who else "**nobody**"))
+        league_of_code = {}
+        for games in season.FIXTURES.values():
+            for home, away, league in games:
+                league_of_code.setdefault(home, league)
+                league_of_code.setdefault(away, league)
+        sections = []
+        for league, league_name in season.LEAGUES.items():
+            rows = []
+            for code, name in sorted(season.TEAM_CODES.items(), key=lambda kv: kv[1]):
+                if league_of_code.get(code) != league:
+                    continue
+                who = known.get(name)
+                if missing_only and who:
+                    continue
+                rows.append("{} - {}".format(
+                    season.label_for(name) if season.usable_emoji(season.TEAM_EMOJI.get(name))
+                    else name,
+                    "<@{}>".format(who) if who else "**nobody**"))
+            if rows:
+                badge = season.LEAGUE_EMOJI.get(league)
+                head = "__**{}:**__".format(league_name)
+                if season.usable_emoji(badge):
+                    head += " " + badge
+                sections.append(head + chr(10) + chr(10).join(rows))
+        lines = [(chr(10) * 2).join(sections)] if sections else []
         embed = notify.BoardEmbed(
             title="Team managers",
             description=("\n".join(lines[:40]) if lines else "Every team is covered. ✅"),
-            footer="{} of {} teams have a manager.".format(
-                len(known), len(season.TEAM_CODES)),
         )
         await interaction.response.send_message(embed=_discord_embed(embed), ephemeral=True)
 
