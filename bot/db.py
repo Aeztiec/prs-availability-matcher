@@ -362,6 +362,17 @@ class Store:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def fixtures_officiated_by(self, referee_id):
+        """Every fixture this person is on, each with the `role` they hold."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT f.*, fr.role AS role FROM fixture_referees fr
+                   JOIN fixtures f ON f.id = fr.fixture_id
+                   WHERE fr.referee_id=? ORDER BY f.week, f.id""",
+                (referee_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def ref_committed_in_slot(self, week, slot_key, referee_id, exclude_fixture=None):
         """Is this referee already officiating another fixture at this kickoff?
 

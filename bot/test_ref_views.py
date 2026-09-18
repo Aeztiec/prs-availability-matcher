@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sys
 
-from bot.ref_views import REF_DYNAMIC_ITEMS, ClaimSelect, MAX_OPTIONS, claim_options
+from bot.ref_views import REF_DYNAMIC_ITEMS, ClaimSelect, MAX_OPTIONS, claim_options, game_name
 from bot.slots import Slot, clean_day, slot_key
 from bot import season
 
@@ -85,6 +85,15 @@ check("plain short codes, not the full names",
       "FRA vs RBL" in real_options[0].label, True)
 check("the full sheet names are gone from the label",
       "EINTRACHT" not in real_options[0].label, True)
+
+print("\na game is named by teams and kickoff, never by fixture number")
+named = fixture(72, SAT_1800.key, season.team_name("RSO"), season.team_name("RMA"))
+check("plain name, no number", game_name(named, SAT_1800), "RSO vs RMA - Sat 18:00")
+check("with the role someone holds",
+      game_name(named, SAT_1800, "REF"), "RSO vs RMA - Sat 18:00 (Referee)")
+check("assistants read as assistant",
+      game_name(named, SUN_1700, "AR"), "RSO vs RMA - Sun 17:00 (Assistant)")
+check("no hash sign anywhere", "#" in game_name(named, SAT_1800, "REF"), False)
 
 print("\na team with no known code just keeps its name")
 check("unmapped team falls back to its full name",

@@ -25,6 +25,20 @@ def _tag(team_name):
     return season.team_code(team_name) or team_name
 
 
+def matchup(fixture):
+    """'RSO vs RMA' - a game named the way people say it, never by number."""
+    return "{} vs {}".format(_tag(fixture["home_team"]), _tag(fixture["away_team"]))
+
+
+def game_name(fixture, slot, role=None):
+    """'RSO vs RMA - Sat 16:30 (Referee)'. The day is in there because the
+    same two teams can meet twice in one week (league and UEFA)."""
+    name = "{} - {} {}".format(matchup(fixture), slot.day[:3], slot.label)
+    if role:
+        name += " ({})".format(referees.ROLE_LABEL[role].capitalize())
+    return name
+
+
 def claim_options(pending, slot_for, week):
     """Select options for the open fixtures, most urgent (no referee at all)
     first, then soonest kickoff. Discord allows at most 25 options."""
@@ -92,10 +106,10 @@ class ClaimSelect(
             return
 
         await interaction.response.send_message(
-            "You're in as **{}** for **#{}** ({} vs {}). Drop out any time "
+            "You're in as **{}** for **{}**. Drop out any time "
             "with `/ref dropout`.".format(
-                referees.ROLE_LABEL[role], fixture["id"],
-                fixture["home_team"], fixture["away_team"]),
+                referees.ROLE_LABEL[role],
+                game_name(fixture, interaction.client.slot(fixture["slot_key"]))),
             ephemeral=True,
         )
         # The board and its menu are edited by id, not through this response -

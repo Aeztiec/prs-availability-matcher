@@ -23,7 +23,7 @@ from discord.ext import tasks
 
 from . import config, notify, referees, season
 from .db import Store
-from .ref_views import REF_DYNAMIC_ITEMS, ClaimSelect, claim_options
+from .ref_views import REF_DYNAMIC_ITEMS, ClaimSelect, claim_options, game_name
 from .fallback import Timings
 from .orchestrator import Action, dashboard, run_once, run_once_randomly
 from .scheduling import Status
@@ -956,9 +956,12 @@ def register(bot):
         )
 
     # --------------------------------------------------------------- ref (self-service)
-    @ref_group.command(name="dropout", description="Drop out of a fixture you're officiating")
-    @app_commands.describe(user="Staff only: drop someone else instead of yourself")
-    async def ref_dropout(interaction, fixture: int, user: discord.User = None):
+    @ref_group.command(name="dropout", description="Drop out of a game you're officiating")
+    @app_commands.describe(
+        game="The game to drop out of - pick from the list as you type",
+        user="Staff only: drop someone else instead of yourself",
+    )
+    async def ref_dropout(interaction, game: str, user: discord.User = None):
         target = user or interaction.user
         if user is not None and user.id != interaction.user.id and not is_staff(interaction):
             await interaction.response.send_message(
@@ -968,27 +971,52 @@ def register(bot):
             )
             return
 
-        record = store.fixture(fixture)
+        try:
+            fixture_id = int(game)
+        except ValueError:
+            await interaction.response.send_message(
+                "Pick a game from the list that appears as you type.", ephemeral=True
+            )
+            return
+        record = store.fixture(fixture_id)
         if not record:
             await interaction.response.send_message(
-                "No fixture #{}.".format(fixture), ephemeral=True
+                "That game no longer exists.", ephemeral=True
             )
             return
         try:
-            role = referees.drop(store, fixture, target.id)
+            role = referees.drop(store, fixture_id, target.id)
         except referees.ClaimError as error:
             await interaction.response.send_message(str(error), ephemeral=True)
             return
 
         who = "You're" if target.id == interaction.user.id else "{} is".format(target.mention)
         await interaction.response.send_message(
-            "{} off #{} ({}). Someone else can claim it now.".format(
-                who, fixture, referees.ROLE_LABEL[role]),
+            "{} off **{}** ({}). Someone else can claim it now.".format(
+                who, game_name(record, bot.slot(record["slot_key"])),
+                referees.ROLE_LABEL[role]),
             ephemeral=True,
         )
-        record = store.fixture(fixture)
         await bot.refresh_ref_board(record["week"])
         await bot.refresh_board(record["week"])
+
+    @ref_dropout.autocomplete("game")
+    async def ref_dropout_games(interaction, current: str):
+        """The games this person is actually on, named by teams and kickoff -
+        so nobody has to know or type a fixture number."""
+        chosen = getattr(interaction.namespace, "user", None)
+        who = interaction.user.id
+        if chosen is not None and chosen.id != who and is_staff(interaction):
+            who = chosen.id
+        choices = []
+        for fixture in store.fixtures_officiated_by(who):
+            slot = bot.slot(fixture["slot_key"]) if fixture["slot_key"] else None
+            if slot is None:
+                continue
+            name = game_name(fixture, slot, fixture["role"])
+            if current.lower() in name.lower():
+                choices.append(app_commands.Choice(name=name[:100], value=str(fixture["id"])))
+        return choices[:25]
 
     @fixture_group.command(name="board",
                            description="Publish the week's fixture board here, or stop updating it")

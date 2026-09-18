@@ -168,6 +168,21 @@ check("claim, claim, drop, status change, claim, status change all present",
        "status -> FULLY_CONFIRMED"])
 
 # --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+print("\nfinding the games someone is officiating")
+# --------------------------------------------------------------------------
+mine = fresh_store()
+mine.add_referee(7, "Ref Seven")
+first = seeded_fixture(mine)
+second = seeded_fixture(mine, slot="sun_1700")
+other = seeded_fixture(mine, slot="sat_1900")
+mine.claim_referee(first, 7, ROLE_REF)
+mine.claim_referee(second, 7, ROLE_AR)
+found = mine.fixtures_officiated_by(7)
+check("every game they are on, none they are not", sorted(f["id"] for f in found), sorted([first, second]))
+check("each comes with the role they hold", {f["id"]: f["role"] for f in found}, {first: ROLE_REF, second: ROLE_AR})
+check("someone on nothing gets an empty list", mine.fixtures_officiated_by(999), [])
 print("")
 if FAILURES:
     print("{} FAILED: {}".format(len(FAILURES), ", ".join(FAILURES)))
