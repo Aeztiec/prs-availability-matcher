@@ -128,7 +128,7 @@ def referee_board_row(fixture, slot, week, roster=(), tag_letters=MIN_TAG_WIDTH)
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
     when = discord_time(slot_datetime(week, slot), "F")
-    tag = league_tag(fixture.get("league"), tag_letters, logo=True)
+    tag = league_tag(fixture.get("league"), tag_letters)
     who = " ".join("<@{}>".format(r["referee_id"]) for r in roster) if roster else "_open_"
     return "{}{} *vs* {} @ {} {}".format(tag, home, away, when, who)
 
