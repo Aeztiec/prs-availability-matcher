@@ -155,8 +155,10 @@ check("every division present",
 check("divisions in a fixed order",
       grouped.index("Premier League:") < grouped.index("Bundesliga:"), True)
 check("the deadline is a field on the last embed",
-      any(name == "Scheduling Deadline" for name, _, _ in grouped_embeds[-1].fields),
+      any(name == "__Scheduling Deadline:__" for name, _, _ in grouped_embeds[-1].fields),
       True)
+check("deadline and extension both stack full-width, not side by side",
+      all(inline is False for _, _, inline in grouped_embeds[-1].fields), True)
 check("says it updates itself, in the footer",
       "updates itself" in (grouped_embeds[-1].footer or ""), True)
 
@@ -373,7 +375,7 @@ try:
     check("only the last embed carries the deadline fields",
           all(e.fields == [] for e in split[:-1]), True)
     check("the last embed has the deadline field",
-          any(name == "Scheduling Deadline" for name, _, _ in split[-1].fields), True)
+          any(name == "__Scheduling Deadline:__" for name, _, _ in split[-1].fields), True)
     check("only the last embed carries the footer",
           all(e.footer is None for e in split[:-1]), True)
     check("the last embed's footer explains the deadline",

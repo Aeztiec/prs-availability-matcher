@@ -360,8 +360,9 @@ def fixture_board(fixtures, week, slot_for,
 
     if deadline is not None:
         embeds[-1].fields = [
-            ("Scheduling Deadline", discord_time(deadline, "F"), True),
-            ("Scheduling Extension", discord_time(deadline + timedelta(days=7), "F"), True),
+            ("__Scheduling Deadline:__", discord_time(deadline, "F"), False),
+            ("__Scheduling Extension:__",
+             discord_time(deadline + timedelta(days=7), "F"), False),
         ]
     embeds[-1].footer = (
         "Not agreed by then and Officials set the time from your submitted "
