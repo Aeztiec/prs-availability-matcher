@@ -568,7 +568,7 @@ def fixture_detail(fixture, history, slot=None, roster=()):
         description="{}\n**{}** vs **{}**".format(
             _game(fixture), fixture["home_team"], fixture["away_team"]),
     )
-    kickoff = (discord_time(slot_datetime(fixture["week"], slot), "F")
+    kickoff = (discord_time(slot_datetime(fixture["week"], slot), ROW_TIME_STYLE)
                if slot else "Not set yet")
     embed.fields += [
         ("Status", STATUS_LABEL.get(fixture["status"], fixture["status"]), True),
