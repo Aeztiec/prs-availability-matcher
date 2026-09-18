@@ -19,7 +19,7 @@ import bot.notify as notify_module
 from bot.db import Store
 from bot.notify import (
     BoardEmbed, board_digest, board_row, dashboard_summary, fixture_board,
-    group_embeds_for_messages, league_tag,
+    group_embeds_for_messages, league_tag, referee_board,
 )
 from bot.orchestrator import dashboard
 from bot.scheduling import Source, Status

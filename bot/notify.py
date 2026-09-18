@@ -161,8 +161,9 @@ def referee_board_row(fixture, slot, week, roster=()):
 def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
                   competition=None):
     """The public, self-updating referee board: every day that has a kickoff
-    time yet, grouped under its own bold heading inside one embed (more than
-    one only if a huge gameweek genuinely needs it - see _chunk_description).
+    time yet, grouped under its own bold heading. Whole days are packed into
+    embeds of at most REFEREE_EMBED_CHUNK characters (see _pack_blocks), all
+    sent in one message.
 
     A fixture still marked TBD is left off entirely - there's nothing to claim
     until it has a time. The claim prompt is a separate embed below this one
@@ -204,16 +205,17 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
             footer=footer_text,
         )]
 
-    lines = []
+    blocks = []
     for day in sorted(by_day):
-        lines.append("**__{} {} {}:__**  📅".format(
-            day.strftime("%A"), day.day, day.strftime("%B")))
+        block = ["**__{} {} {}:__**  📅".format(
+            day.strftime("%A"), day.day, day.strftime("%B"))]
         for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0]):
-            lines.append(referee_board_row(
+            block.append(referee_board_row(
                 fixture, slot, week, rosters.get(fixture["id"])))
-        lines.append("")
+        block.append("")
+        blocks.append(block)
 
-    chunks = _chunk_description(lines)
+    chunks = _pack_blocks(blocks, REFEREE_EMBED_CHUNK)
     embeds = [BoardEmbed(title=title if i == 0 else None, description=d)
              for i, d in enumerate(chunks)]
     embeds[-1].footer = footer_text
@@ -414,7 +416,7 @@ def availability_call_to_action(gameweek, deadline):
 DESCRIPTION_CHUNK = 4096
 
 
-def _chunk_description(lines):
+def _chunk_description(lines, limit=None):
     """Split rendered lines into embed-description-sized pieces, never mid-row.
 
     Each finished chunk's actual length is DESCRIPTION_CHUNK minus one at
@@ -422,11 +424,12 @@ def _chunk_description(lines):
     last line never actually gets once joined, so the real string is
     always one character shorter than the budget it was closed under.
     """
+    limit = limit or DESCRIPTION_CHUNK
     chunks = []
     current = []
     length = 0
     for line in lines:
-        if length + len(line) + 1 > DESCRIPTION_CHUNK and current:
+        if length + len(line) + 1 > limit and current:
             chunks.append("\n".join(current))
             current = []
             length = 0
@@ -435,6 +438,38 @@ def _chunk_description(lines):
     if current:
         chunks.append("\n".join(current))
     return chunks or [""]
+
+
+# What the referee board keeps each embed under. Discord *stores* a
+# description up to 4096 characters, but the client was observed silently
+# not displaying the tail of a ~4000-character one (the board's Sunday
+# section went missing on screen while the API held it in full) - so the
+# referee board packs whole days into embeds well under that instead of
+# trusting the hard cap. Days stay together; only a single day bigger than
+# this is ever split.
+REFEREE_EMBED_CHUNK = 2500
+
+
+def _pack_blocks(blocks, limit):
+    """Pack lists of lines (one per day) into embed descriptions of at most
+    `limit` characters, never splitting a block unless it alone is too big."""
+    packed = []
+    current = []
+    length = 0
+    for block in blocks:
+        size = sum(len(line) + 1 for line in block)
+        if current and length + size > limit:
+            packed.append(current)
+            current = []
+            length = 0
+        current = current + block
+        length += size
+    if current:
+        packed.append(current)
+    out = []
+    for lines in packed:
+        out.extend(_chunk_description(lines, limit))
+    return out or [""]
 
 
 # Discord's cap on the *combined* size of every embed attached to one
