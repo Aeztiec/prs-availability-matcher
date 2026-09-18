@@ -225,13 +225,15 @@ def referee_claim_prompt(open_count):
             title="Referees",
             description="Every game above is fully staffed. ✅",
         )
+    noun = "game" if open_count == 1 else "games"
+    verb = "needs" if open_count == 1 else "need"
     return BoardEmbed(
         title="Referees, claim a game",
         description=(
             "Pick an open game from the menu below to take it. First come, "
             "first served - one referee and up to two assistants per game."
         ),
-        footer="{} game(s) still need officiating.".format(open_count),
+        footer="{} {} still {} officiating.".format(open_count, noun, verb),
     )
 
 
@@ -379,15 +381,17 @@ def availability_call_to_action(gameweek, deadline):
     return BoardEmbed(
         title="Managers, submit your timings",
         description=(
-            "Use the button below to enter the times **{}** works for your "
-            "team. The selector opens privately, so only you can see your "
-            "responses.\n\n"
-            "Mark each time as **🟢 ideal**, **🟡 fine**, or leave it **⚪ no** "
-            "if you are not available. Once both managers have responded, "
-            "the best mutually available time is selected automatically and "
-            "the fixture list above is updated."
+            "Use the button below to submit the times **{}** works for "
+            "your team. The selector opens privately, so only you can see "
+            "your responses.\n\n"
+            "Once both managers have responded, the best mutually available "
+            "time is selected automatically and the fixture list above "
+            "updates."
         ).format(gameweek.label),
-        fields=[("Deadline", discord_time(deadline, "F"), False)],
+        fields=[
+            ("Legend", "⚪ No · 🟡 Fine · 🟢 Ideal", False),
+            ("Deadline", discord_time(deadline, "F"), False),
+        ],
         footer=("If you have nothing to submit, your gameweek may not be "
                 "open yet, or you are not registered as a manager. Contact "
                 "an Official if you believe this is incorrect."),
