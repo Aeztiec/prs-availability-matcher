@@ -379,7 +379,7 @@ try:
     check("only the last embed carries the footer",
           all(e.footer is None for e in split[:-1]), True)
     check("the last embed's footer explains the deadline",
-          "Officials set the time" in split[-1].footer, True)
+          "Officials schedule it" in split[-1].footer, True)
     check("and mentions the timezone",
           "your own timezone" in split[-1].footer, True)
 finally:

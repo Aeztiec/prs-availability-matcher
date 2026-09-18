@@ -206,7 +206,7 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
 
     lines = [header, ""]
     for day in sorted(by_day):
-        lines.append("**{} {} {}**".format(
+        lines.append("**__{} {} {}:__**  📅".format(
             day.strftime("%A"), day.day, day.strftime("%B")))
         for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0]):
             lines.append(referee_board_row(
@@ -356,10 +356,10 @@ def fixture_board(fixtures, week, slot_for,
             ("Scheduling Extension", discord_time(deadline + timedelta(days=7), "F"), False),
         ]
     embeds[-1].footer = (
-        "Not agreed by then and Officials set the time from your submitted "
-        "timings. The absolute latest a fixture can be scheduled to, if "
-        "postponed. Times show in your own timezone. This post updates "
-        "itself as fixtures are agreed."
+        "If a fixture isn't agreed by the deadline, Officials schedule it "
+        "from your submitted timings - the extension is the latest it can "
+        "still be moved to if postponed. Times show in your own timezone, "
+        "and this board updates itself as fixtures are agreed."
     )
     return embeds
 
