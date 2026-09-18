@@ -23,7 +23,10 @@ from discord.ext import tasks
 
 from . import config, notify, referees, season
 from .db import Store
-from .ref_views import REF_DYNAMIC_ITEMS, ClaimSelect, claim_options, game_name
+from .ref_views import (
+    REF_DYNAMIC_ITEMS, ClaimSelect, claim_options, game_name, matchup, staff_game_name,
+)
+from .text import plural
 from .fallback import Timings
 from .orchestrator import Action, dashboard, run_once, run_once_randomly
 from .scheduling import Status
@@ -179,7 +182,7 @@ class PRSBot(discord.Client):
             log.warning("board channel for %s unreachable: %s", week, error)
             return None
 
-    async def post(self, channel, content, view=None, mention_users=True):
+    async def post(self, channel, content=None, view=None, mention_users=True, embed=None):
         """Post to a channel, allowing user and role pings but never @everyone."""
         if channel is None:
             return None
@@ -187,7 +190,8 @@ class PRSBot(discord.Client):
             everyone=False, roles=True, users=mention_users
         )
         try:
-            return await channel.send(content, view=view, allowed_mentions=allowed)
+            return await channel.send(content=content, embed=embed, view=view,
+                                      allowed_mentions=allowed)
         except (discord.Forbidden, discord.HTTPException) as error:
             log.warning("could not post in %s: %s", getattr(channel, "id", "?"), error)
             return None
@@ -224,9 +228,9 @@ class PRSBot(discord.Client):
             elif outcome.action == Action.REMIND:
                 channel = await self.channel_for(fixture["week"])
                 for which in outcome.reminders:
-                    await self.post(channel, notify.reminder(
-                        fixture, fixture["deadline"], which,
-                        managers=outcome.notify))
+                    content, embed = notify.reminder(
+                        fixture, fixture["deadline"], which, managers=outcome.notify)
+                    await self.post(channel, content, embed=_discord_embed(embed))
                     self.store.mark_reminded(fixture["id"], which)
             elif outcome.action == Action.NO_VALID_TIME:
                 log.warning("fixture %s needs manual scheduling: %s",
@@ -599,10 +603,11 @@ class PRSBot(discord.Client):
     async def show_dashboard(self, interaction, week, followup=False):
         buckets = dashboard(self.store, week=week)
         waiting_on, reasons, rosters = self.dashboard_context(week)
-        body = notify.dashboard_summary(buckets, week, waiting_on, reasons, rosters)
+        embed = notify.dashboard_summary(buckets, week, waiting_on, reasons, rosters,
+                                         slot_for=self.slot)
         sender = interaction.followup.send if followup else \
             interaction.response.send_message
-        await sender(body, ephemeral=True)
+        await sender(embed=_discord_embed(embed), ephemeral=True)
 
     @tasks.loop(minutes=TICK_MINUTES)
     async def runner(self):
@@ -757,12 +762,12 @@ def register(bot):
         # manager already has another fixture of their own that week.
         posted = await bot.post(
             interaction.channel,
-            notify.ask_for_availability(fixture, to_iso(when)),
+            embed=_discord_embed(notify.ask_for_availability(fixture, to_iso(when))),
             view=opener(Target(SCOPE_FIXTURE, week)),
         )
         await interaction.followup.send(
-            "Created **#{}**: {} vs {}, deadline {}.\n{}".format(
-                fixture_id, resolved["home"], resolved["away"],
+            "Created **{} vs {}**, deadline {}.\n{}".format(
+                resolved["home"], resolved["away"],
                 when.strftime("%a %d %b %H:%M UTC"),
                 "Posted here with a submit button."
                 if posted else "⚠️ Couldn't post here. Check my permissions.",
@@ -776,21 +781,60 @@ def register(bot):
     async def fixture_list(interaction, week: str = None):
         await bot.show_dashboard(interaction, week or bot.current_week())
 
-    @fixture_group.command(name="show", description="One fixture, with its scheduling log")
+    def game_autocomplete(needs_time=False):
+        """Autocomplete for staff commands: games in the open gameweeks named
+        by teams, kickoff and league - staff never have to look up or type a
+        fixture number. Typing filters by team code or full team name."""
+        async def complete(interaction, current: str):
+            weeks = {gw.week for gw in bot.open_gameweeks()}
+            rows = [f for f in store.fixtures()
+                    if f["week"] in weeks and (f["slot_key"] or not needs_time)]
+
+            def order(f):
+                slot = bot.slot(f["slot_key"]) if f["slot_key"] else None
+                return (f["week"], slot.day_index if slot else 9,
+                        slot.minutes if slot else 0, f["id"])
+
+            needle = current.lower()
+            choices = []
+            for f in sorted(rows, key=order):
+                slot = bot.slot(f["slot_key"]) if f["slot_key"] else None
+                name = staff_game_name(f, slot)
+                haystack = "{} {} {}".format(name, f["home_team"], f["away_team"]).lower()
+                if needle in haystack:
+                    choices.append(app_commands.Choice(name=name[:100], value=str(f["id"])))
+            return choices[:25]
+        return complete
+
+    async def resolve_game(interaction, value):
+        """The fixture a picked game refers to, or None after telling the
+        user what to do instead."""
+        try:
+            record = store.fixture(int(value))
+        except ValueError:
+            record = None
+            message = "Pick a game from the list that appears as you type."
+        else:
+            message = "That game no longer exists."
+        if record is None:
+            await interaction.response.send_message(message, ephemeral=True)
+        return record
+
+    @fixture_group.command(name="show", description="One game, with its scheduling log")
+    @app_commands.describe(game="The game - pick from the list as you type")
     @staff_only()
-    async def fixture_show(interaction, fixture: int):
-        record = store.fixture(fixture)
-        if not record:
-            await interaction.response.send_message(
-                "No fixture #{}.".format(fixture), ephemeral=True
-            )
+    async def fixture_show(interaction, game: str):
+        record = await resolve_game(interaction, game)
+        if record is None:
             return
         await interaction.response.send_message(
-            notify.fixture_detail(record, store.history(fixture),
-                                  bot.slot(record["slot_key"]),
-                                  store.fixture_referees(fixture)),
+            embed=_discord_embed(notify.fixture_detail(
+                record, store.history(record["id"]),
+                bot.slot(record["slot_key"]), store.fixture_referees(record["id"]))),
             ephemeral=True,
         )
+
+    fixture_show.autocomplete("game")(game_autocomplete())
 
     @fixture_group.command(name="run", description="Run a scheduling pass now")
     @staff_only()
@@ -800,14 +844,14 @@ def register(bot):
         await bot.show_dashboard(interaction, week or bot.current_week(), followup=True)
 
     @fixture_group.command(name="set", description="Set a kickoff time by hand")
-    @app_commands.describe(slot="Slot key, e.g. sat_1800")
+    @app_commands.describe(
+        game="The game - pick from the list as you type",
+        slot="Slot key, e.g. sat_1800",
+    )
     @staff_only()
-    async def fixture_set(interaction, fixture: int, slot: str):
-        record = store.fixture(fixture)
-        if not record:
-            await interaction.response.send_message(
-                "No fixture #{}.".format(fixture), ephemeral=True
-            )
+    async def fixture_set(interaction, game: str, slot: str):
+        record = await resolve_game(interaction, game)
+        if record is None:
             return
         chosen = bot.slot(slot)
         if not chosen:
@@ -818,15 +862,18 @@ def register(bot):
                 ephemeral=True,
             )
             return
-        store.set_schedule(fixture, chosen.key, "MANUAL", Status.SCHEDULED)
-        store.note(fixture, "set by hand", "{} by {}".format(chosen.key, interaction.user.id))
-        record = store.fixture(fixture)
+        fixture_id = record["id"]
+        store.set_schedule(fixture_id, chosen.key, "MANUAL", Status.SCHEDULED)
+        store.note(fixture_id, "set by hand", "{} by {}".format(chosen.key, interaction.user.id))
         await interaction.response.defer(ephemeral=True)
         await bot.refresh_board(record["week"])
         await interaction.followup.send(
-            "#{} set to {}. The fixture post has been updated.".format(fixture, chosen),
+            "**{}** set to {}. The fixture board has been updated.".format(
+                matchup(record), chosen),
             ephemeral=True,
         )
+
+    fixture_set.autocomplete("game")(game_autocomplete())
 
     # ------------------------------------------------------------ referees
     @refs_group.command(name="register", description="Register a referee, or deactivate one")
@@ -855,60 +902,64 @@ def register(bot):
                 "No referees registered. Add one with `/refs register`.", ephemeral=True
             )
             return
-        lines = ["**Referees: week of {}**".format(week), ""]
-        for ref in rows:
-            lines.append("· <@{}>: {} game(s)".format(
-                ref["discord_id"], workload.get(ref["discord_id"], 0)))
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        lines = ["<@{}>: {}".format(
+            ref["discord_id"], plural(workload.get(ref["discord_id"], 0), "game"))
+            for ref in rows]
+        embed = notify.BoardEmbed(
+            title="Referees: week of {}".format(week), description="\n".join(lines))
+        await interaction.response.send_message(embed=_discord_embed(embed), ephemeral=True)
 
     @refs_group.command(name="assign", description="Assign a referee by hand")
-    @app_commands.describe(role="Which role to fill (default: next open one)")
+    @app_commands.describe(
+        game="The game - pick from the list as you type",
+        role="Which role to fill (default: next open one)",
+    )
     @app_commands.choices(role=[
         app_commands.Choice(name="Referee", value=referees.ROLE_REF),
         app_commands.Choice(name="Assistant", value=referees.ROLE_AR),
     ])
     @staff_only()
-    async def refs_assign(interaction, fixture: int, user: discord.User,
+    async def refs_assign(interaction, game: str, user: discord.User,
                           role: app_commands.Choice[str] = None):
-        record = store.fixture(fixture)
-        if not record:
-            await interaction.response.send_message(
-                "No fixture #{}.".format(fixture), ephemeral=True
-            )
+        record = await resolve_game(interaction, game)
+        if record is None:
             return
         if not record["slot_key"]:
             await interaction.response.send_message(
-                "#{} has no kickoff time yet.".format(fixture), ephemeral=True
+                "That game has no kickoff time yet.", ephemeral=True
             )
             return
-        roster = store.fixture_referees(fixture)
+        fixture_id = record["id"]
+        name = game_name(record, bot.slot(record["slot_key"]))
+        roster = store.fixture_referees(fixture_id)
         if any(r["referee_id"] == user.id for r in roster):
             await interaction.response.send_message(
-                "{} is already on #{}.".format(user.mention, fixture), ephemeral=True
+                "{} is already on **{}**.".format(user.mention, name), ephemeral=True
             )
             return
         chosen_role = role.value if role else referees.next_open_role(
             [r["role"] for r in roster])
         if chosen_role is None:
             await interaction.response.send_message(
-                "#{} already has a full team of officials.".format(fixture),
+                "**{}** already has a full team of officials.".format(name),
                 ephemeral=True,
             )
             return
 
         store.add_referee(user.id, user.display_name)
-        store.claim_referee(fixture, user.id, chosen_role)
+        store.claim_referee(fixture_id, user.id, chosen_role)
         if chosen_role == referees.ROLE_REF:
-            store.set_status(fixture, Status.FULLY_CONFIRMED,
+            store.set_status(fixture_id, Status.FULLY_CONFIRMED,
                              "referee set by hand by {}".format(interaction.user.id))
-        record = store.fixture(fixture)
         await bot.refresh_ref_board(record["week"])
         await bot.refresh_board(record["week"])
         await interaction.response.send_message(
-            "{} assigned as {} on #{}. The referee board has been updated.".format(
-                user.mention, referees.ROLE_LABEL[chosen_role], fixture),
+            "{} assigned as {} on **{}**. The referee board has been updated.".format(
+                user.mention, referees.ROLE_LABEL[chosen_role], name),
             ephemeral=True,
         )
+
+    refs_assign.autocomplete("game")(game_autocomplete(needs_time=True))
 
     @refs_group.command(name="board",
                         description="Publish the referee claim board here, or stop updating it")
@@ -971,19 +1022,10 @@ def register(bot):
             )
             return
 
-        try:
-            fixture_id = int(game)
-        except ValueError:
-            await interaction.response.send_message(
-                "Pick a game from the list that appears as you type.", ephemeral=True
-            )
+        record = await resolve_game(interaction, game)
+        if record is None:
             return
-        record = store.fixture(fixture_id)
-        if not record:
-            await interaction.response.send_message(
-                "That game no longer exists.", ephemeral=True
-            )
-            return
+        fixture_id = record["id"]
         try:
             role = referees.drop(store, fixture_id, target.id)
         except referees.ClaimError as error:
@@ -1068,7 +1110,7 @@ def register(bot):
         now = utcnow()
         here = season.current(now)
         opened = store.opened_gameweeks()
-        lines = ["# {} calendar".format(season.SEASON), ""]
+        lines = []
         for gw in season.ALL:
             marks = []
             if here and gw.key == here.key:
@@ -1084,11 +1126,15 @@ def register(bot):
             lines.append("`{:<4}` {}: plays {}, deadline {} {}{}".format(
                 gw.key, gw.label, gw.friday.strftime("%a %d %b"),
                 local.strftime("%a %d %b %H:%M"), label,
-                "  · " + ", ".join(marks) if marks else "",
+                "  ·  " + ", ".join(marks) if marks else "",
             ))
-        lines += ["", "-# Managers can set availability for the current gameweek, "
-                      "plus any Officials have opened early."]
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        embed = notify.BoardEmbed(
+            title="{} calendar".format(season.SEASON),
+            description="\n".join(lines),
+            footer=("Managers can set availability for the current gameweek, "
+                    "plus any Officials have opened early."),
+        )
+        await interaction.response.send_message(embed=_discord_embed(embed), ephemeral=True)
 
     @gw_group.command(name="open",
                       description="Create a gameweek's fixtures and post the announcement")
@@ -1159,11 +1205,12 @@ def register(bot):
             log.warning("could not post the announcement: %s", error)
 
         deadline_local, deadline_label = uk_time(gw.deadline)
-        parts = ["Opened **{}**: {} fixture(s) created, deadline {} {}.".format(
-            gw.key, len(made), deadline_local.strftime("%a %d %b %H:%M"), deadline_label)]
+        parts = ["Opened **{}**: {} created, deadline {} {}.".format(
+            gw.key, plural(len(made), "fixture"), deadline_local.strftime("%a %d %b %H:%M"), deadline_label)]
         if test:
-            parts.append("-# TEST MODE: {} fixture(s) given a random kickoff time - "
-                         "availability was skipped entirely.".format(scheduled))
+            parts.append("-# TEST MODE: {} given a random kickoff time - "
+                         "availability was skipped entirely.".format(
+                             plural(scheduled, "fixture")))
         if posted:
             parts.append("Announcement posted here" +
                          ("." if test else " with the **Submit my timings** button.") +
@@ -1219,12 +1266,15 @@ def register(bot):
             who = known.get(name)
             if missing_only and who:
                 continue
-            lines.append("· `{:<3}` {}: {}".format(
+            lines.append("`{:<3}` {}: {}".format(
                 code, name, "<@{}>".format(who) if who else "**nobody**"))
-        header = "{} of {} teams have a manager.".format(len(known), len(season.TEAM_CODES))
-        body = header + ("\n\n" + "\n".join(lines[:40]) if lines else
-                         "\n\nEvery team is covered. ✅")
-        await interaction.response.send_message(body, ephemeral=True)
+        embed = notify.BoardEmbed(
+            title="Team managers",
+            description=("\n".join(lines[:40]) if lines else "Every team is covered. ✅"),
+            footer="{} of {} teams have a manager.".format(
+                len(known), len(season.TEAM_CODES)),
+        )
+        await interaction.response.send_message(embed=_discord_embed(embed), ephemeral=True)
 
     # -------------------------------------------------------------------- test
     @test_group.command(name="managers",
@@ -1253,11 +1303,11 @@ def register(bot):
 
         shown = ", ".join(assigned[:15]) + (", ..." if len(assigned) > 15 else "")
         await interaction.response.send_message(
-            "Set **{}** team(s), spread evenly across {}. This overwrites any "
+            "Set **{}**, spread evenly across {}. This overwrites any "
             "existing manager for every team, including on fixtures already "
             "created - so a previous manager is fully freed up (e.g. to "
             "referee) rather than left blocked on their old games.\n-# {}".format(
-                len(assigned), ", ".join(t.mention for t in testers), shown),
+                plural(len(assigned), "team"), ", ".join(t.mention for t in testers), shown),
             ephemeral=True,
         )
 
@@ -1292,9 +1342,9 @@ def register(bot):
             await bot.refresh_ref_board(week)
             await bot.refresh_board(week)
         await interaction.response.send_message(
-            "Registered {} as referees and made **{}** claim(s) across open "
+            "Registered {} as referees and made **{}** across open "
             "games ({} skipped, usually a kickoff clash).".format(
-                ", ".join(t.mention for t in testers), claimed, skipped),
+                ", ".join(t.mention for t in testers), plural(claimed, "claim"), skipped),
             ephemeral=True,
         )
 

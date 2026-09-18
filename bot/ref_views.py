@@ -39,6 +39,15 @@ def game_name(fixture, slot, role=None):
     return name
 
 
+def staff_game_name(fixture, slot):
+    """'RSO vs RMA - Sat 16:30 - LL': a game for staff to pick from a list. A
+    fixture with no kickoff yet reads TBD, and the league code is on the end
+    because the same two teams can be down twice in a week (league and UEFA)
+    and two TBDs would otherwise look identical."""
+    when = "{} {}".format(slot.day[:3], slot.label) if slot else "TBD"
+    return "{} - {} - {}".format(matchup(fixture), when, fixture.get("league") or "?")
+
+
 def claim_options(pending, slot_for, week):
     """Select options for the open fixtures, most urgent (no referee at all)
     first, then soonest kickoff. Discord allows at most 25 options."""

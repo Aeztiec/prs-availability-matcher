@@ -57,7 +57,10 @@ def say_embed(embed, prefix="    "):
     for line in embed.description.splitlines():
         say(prefix + line)
     for name, value, _ in embed.fields:
-        say(prefix + "{}: {}".format(name, value))
+        first, *rest = "{}: {}".format(name, value).split(chr(10))
+        say(prefix + first)
+        for extra in rest:
+            say(prefix + "  " + extra)
     if embed.footer:
         say(prefix + "-# " + embed.footer)
 
@@ -71,11 +74,13 @@ def expect(label, got, want):
         PROBLEMS.append(label)
 
 
-def show_dm(who, body):
+def show_post(where, embed, content=None):
+    """Print an embed the way it would appear in a channel."""
     say("")
-    say("    ┌─ DM to {} ".format(who) + "─" * max(0, 50 - len(who)))
-    for line in body.splitlines():
-        say("    │ " + line)
+    say("    ┌─ Posted in {} ".format(where) + "─" * max(0, 50 - len(where)))
+    if content:
+        say("    │ " + content)
+    say_embed(embed, prefix="    │ ")
     say("    └" + "─" * 60)
 
 
@@ -206,8 +211,7 @@ fid1, home1, away1 = create("ARS", "MCI")
 fixture = store.fixture(fid1)
 say("")
 say("    {} vs {}   fixture #{}".format(home1, away1, fid1))
-show_dm("{} manager".format(home1),
-        notify.ask_for_availability(fixture, to_iso(gw.deadline)))
+show_post("#availability", notify.ask_for_availability(fixture, to_iso(gw.deadline)))
 say("    Both managers click [Set availability] and fill the selector in.")
 
 home_picks = {"sat_1800": Pref.IDEAL, "sat_1830": Pref.IDEAL, "sun_1700": Pref.FINE}
@@ -225,7 +229,6 @@ expect("scheduled from manager preferences", outcome.decision.source,
 expect("took the slot both called ideal", outcome.decision.slot.key, "sat_1800")
 
 fixture = store.fixture(fid1)
-show_dm("both managers", notify.fixture_confirmed(fixture, slot_of(fixture["slot_key"])))
 say("")
 say("    The call for a referee goes up in #referees. First come, first served -")
 say("    up to one referee and two assistants/VARs per game.")
@@ -249,8 +252,9 @@ say("    Before the deadline  -> {} ({})".format(before.action, before.detail))
 expect("waits, does not schedule early", before.action, Action.WAIT)
 
 fixture = store.fixture(fid2)
-show_dm("{} manager".format(away2),
-        notify.reminder(fixture, fixture["deadline"], "2h"))
+reminder_content, reminder_embed = notify.reminder(
+    fixture, fixture["deadline"], "2h", managers=[MANAGERS[away2]])
+show_post("#availability", reminder_embed, content=reminder_content)
 
 after = advance(store, timings, store.fixture(fid2),
                 now=gw.deadline + timedelta(minutes=1), rng=RNG)
@@ -262,7 +266,6 @@ expect("did NOT just take the one reply's pick",
        after.decision.slot.key != "sun_2200", True)
 
 fixture = store.fixture(fid2)
-show_dm("both managers", notify.fixture_confirmed(fixture, slot_of(fixture["slot_key"])))
 say("")
 claim_referee(fid2, 9002)
 say("    {} has to pull out, and uses /ref dropout.".format(REFS[9002]))
@@ -293,8 +296,6 @@ say("")
 say("    Staff fixes it:  /fixture set fixture:{} slot:sat_2000".format(fid3))
 store.set_schedule(fid3, "sat_2000", "MANUAL", Status.SCHEDULED)
 store.note(fid3, "set by hand", "sat_2000 by a staff member")
-fixture = store.fixture(fid3)
-show_dm("both managers", notify.fixture_confirmed(fixture, slot_of("sat_2000")))
 claim_referee(fid3, 9001)
 
 
@@ -325,16 +326,14 @@ for f in store.fixtures(week=gw.week):
             reasons[f["id"]] = entry["detail"]
             break
 say("")
-for line in notify.dashboard_summary(buckets, gw.week, waiting_on, reasons,
-                                     rosters).splitlines():
-    say("    " + line)
+say_embed(notify.dashboard_summary(buckets, gw.week, waiting_on, reasons,
+                                   rosters, slot_for=slot_of))
 
 rule("THE AUDIT TRAIL  ·  /fixture show 2")
 say("")
-for line in notify.fixture_detail(store.fixture(fid2), store.history(fid2),
-                                  slot_of(store.fixture(fid2)["slot_key"]),
-                                  store.fixture_referees(fid2)).splitlines():
-    say("    " + line)
+say_embed(notify.fixture_detail(store.fixture(fid2), store.history(fid2),
+                                slot_of(store.fixture(fid2)["slot_key"]),
+                                store.fixture_referees(fid2)))
 
 
 # --------------------------------------------------------------------------

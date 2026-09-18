@@ -26,7 +26,16 @@ from bot.scheduling import Source, Status
 from bot.slots import Slot, clean_day, slot_key
 
 FAILURES = []
-DISCORD_LIMIT = 2000
+DISCORD_LIMIT = 6000   # one message's embeds, combined
+
+
+def flat(embed):
+    """All of an embed's text as one string."""
+    parts = [embed.title or "", embed.description or "", embed.footer or ""]
+    parts += ["{}".format(name) + chr(10) + str(value) for name, value, _ in embed.fields]
+    return chr(10).join(parts)
+
+
 # An embed description's own limit, separate from (and much bigger than) the
 # 2000-character cap on a plain message's content.
 EMBED_DESC_LIMIT = 4096
@@ -223,7 +232,7 @@ buckets = dashboard(store, week=WEEK)
 waiting_on = {f["id"]: store.unsubmitted_managers(f["id"]) for f in store.fixtures(week=WEEK)}
 reasons = {stuck: "no overlapping availability"}
 rosters = roster_of(store, store.fixtures(week=WEEK))
-body = dashboard_summary(buckets, WEEK, waiting_on, reasons, rosters)
+body = flat(dashboard_summary(buckets, WEEK, waiting_on, reasons, rosters))
 
 check("counts confirmed", "**3** fully confirmed" in body, True)
 check("counts awaiting", "**1** awaiting response" in body, True)
@@ -233,7 +242,7 @@ check("names the manager who hasn't replied", "<@52>" in body, True)
 check("does not chase the one who did", "<@51>" not in body, True)
 check("gives the blocking reason", "no overlapping availability" in body, True)
 check("says how many assistants were already claimed",
-      "1 assistant(s) already claimed" in body, True)
+      "1 assistant already claimed" in body, True)
 check("tells staff the fix for scheduling", "/fixture set" in body, True)
 check("tells staff the fix for refs", "/refs assign" in body, True)
 check("fits Discord's limit", len(body) <= DISCORD_LIMIT, True)
@@ -241,7 +250,7 @@ check("fits Discord's limit", len(body) <= DISCORD_LIMIT, True)
 print("\na clean week says nothing needs attention")
 store = fresh_store()
 build_week(store, 4)
-clean = dashboard_summary(dashboard(store, week=WEEK), WEEK)
+clean = flat(dashboard_summary(dashboard(store, week=WEEK), WEEK))
 check("all clear", "Nothing needs attention" in clean, True)
 check("still shows the count", "**4** fully confirmed" in clean, True)
 
@@ -252,7 +261,7 @@ for n in range(15):
                                600 + n, 700 + n, "2026-09-11T18:00:00Z",
                                Status.WAITING_FOR_AVAILABILITY)
     store.set_status(fid, Status.NEEDS_MANUAL_SCHEDULING, "nothing overlaps")
-busy = dashboard_summary(dashboard(store, week=WEEK), WEEK)
+busy = flat(dashboard_summary(dashboard(store, week=WEEK), WEEK))
 check("says how many more", "and 7 more" in busy, True)
 check("still within the limit", len(busy) <= DISCORD_LIMIT, True)
 
@@ -452,6 +461,35 @@ check("a team without a badge falls back to its name",
       _season.label_for("NO SUCH TEAM"), "NO SUCH TEAM")
 check("a team with one shows only the badge",
       _season.label_for("ARSENAL"), _season.TEAM_EMOJI["ARSENAL"])
+
+
+
+# --------------------------------------------------------------------------
+print(chr(10) + "shared wording helpers and the other staff/manager embeds")
+# --------------------------------------------------------------------------
+from bot.text import plural
+from bot.notify import ask_for_availability, reminder, fixture_detail, _rows_field
+
+check("one", plural(1, "game"), "1 game")
+check("many", plural(3, "game"), "3 games")
+check("zero", plural(0, "claim"), "0 claims")
+
+fx = store.fixture(fid)
+ask = ask_for_availability(fx, "2026-09-11T18:00:00Z")
+check("ask is an embed", ask.title, "New fixture: needs a kickoff time")
+check("ask has a deadline field", ask.fields[0][0], "Deadline")
+
+content, rem = reminder(fx, "2026-09-11T18:00:00Z", "2h", managers=[52])
+check("reminder pings in content", content, "<@52>")
+check("reminder titled", rem.title, "Reminder: submit your timings")
+check("reminder has no pings in the embed", "<@" in flat(rem), False)
+
+detail = flat(fixture_detail(fx, [], None, []))
+check("detail hides fixture number", "#{}".format(fid) in detail, False)
+
+rows = ["x" * 300] * 8
+check("field never over the limit", len(_rows_field(rows)) <= 1024, True)
+
 
 # --------------------------------------------------------------------------
 print("")

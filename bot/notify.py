@@ -18,10 +18,8 @@ from . import season
 from .referees import MAX_ASSISTANTS, ROLE_AR, ROLE_REF
 from .scheduling import Source
 
+from .text import plural
 from .weeks import discord_time, from_iso, slot_datetime, week_saturday
-
-FOOTER = "-# Times show in your own timezone."
-
 
 @dataclass
 class BoardEmbed:
@@ -38,82 +36,59 @@ class BoardEmbed:
     footer: str = None
 
 
-def _slot_line(week, slot):
-    moment = slot_datetime(week, slot)
-    return "{}  ({} {} GMT)".format(discord_time(moment), slot.day, slot.label)
+def _game(fixture):
+    """'<badge> vs <badge>' - a game the way the boards show it."""
+    return "{} vs {}".format(season.label_for(fixture["home_team"]),
+                             season.label_for(fixture["away_team"]))
+
+
+LEGEND_LINE = "**How to mark each time slot:** ⚪ No · 🟡 Fine · 🟢 Ideal"
 
 
 def ask_for_availability(fixture, deadline_iso):
-    """The opening post for a single fixture: what it is and by when.
-
-    Used by /fixture create for a one-off. A whole gameweek is announced by
-    fixture_board instead, which covers all twenty at once.
-    """
-    return "\n".join([
-        "# {} vs {}".format(fixture["home_team"], fixture["away_team"]),
-        "Fixture **#{}** needs a kickoff time.".format(fixture["id"]),
-        "",
-        "Mark every time you could play as **🟢 ideal**, **🟡 fine**, or leave it "
-        "**⚪ no**. We will pick the best time you and your opponent both agree on.",
-        "",
-        "Deadline: {}".format(discord_time(from_iso(deadline_iso))),
-        "",
-        "Press the button below, or use **/availability**. You can change your "
-        "answers until the deadline.",
-        "",
-        "-# If neither of you replies, Officials will allocate a time from your "
-        "teams' saved timings.",
-    ])
+    """The post for a single fixture made by hand with /fixture create: what
+    it is and by when. A whole gameweek is announced by fixture_board instead."""
+    return BoardEmbed(
+        title="New fixture: needs a kickoff time",
+        description=(
+            "{}\n\n"
+            "Use the button below to submit the times your team can play. The "
+            "selector opens privately, so only you can see your responses.\n\n"
+            "{}\n\n"
+            "You can change your answers until the deadline."
+        ).format(_game(fixture), LEGEND_LINE),
+        fields=[("Deadline", discord_time(from_iso(deadline_iso), "F"), False)],
+        footer=("If neither manager replies, Officials will allocate a time from "
+                "your teams' saved timings."),
+    )
 
 
 def reminder(fixture, deadline_iso, which, managers=()):
-    """A public nudge, mentioning whoever still owes an answer.
+    """A public nudge for whoever still owes an answer: (content, embed).
 
-    Posted in the channel rather than DM'd. A DM only reaches people who allow
-    DMs from server members, and the ones who have not submitted are exactly
-    the ones most likely to have them off.
+    The mentions go in the message content because a mention inside an embed
+    never notifies anyone. Posted in the channel rather than DM'd - a DM only
+    reaches people who allow DMs from server members, and the ones who have
+    not submitted are exactly the ones most likely to have them off.
     """
     urgency = {"12h": "in about 12 hours", "2h": "in about 2 hours"}.get(which, "soon")
-    who = " ".join("<@{}>".format(m) for m in managers)
-    lines = [
-        "⏰ **Reminder: {} vs {}**".format(fixture["home_team"], fixture["away_team"]),
-    ]
-    if who:
-        lines.append(who)
-    lines += [
-        "",
-        "Still no timings from {} of you. The deadline is {} ({}).".format(
-            "one" if len(managers) == 1 else "both",
-            urgency, discord_time(from_iso(deadline_iso)),
+    content = " ".join("<@{}>".format(m) for m in managers) or None
+    embed = BoardEmbed(
+        title="Reminder: submit your timings",
+        description=(
+            "{} still needs timings from {}.\n\n"
+            "The deadline is {} ({}).\n\n"
+            "Use the **Submit my timings** button on the fixture board, or run "
+            "**/availability**."
+        ).format(
+            _game(fixture),
+            "one of you" if len(managers) == 1 else "both managers",
+            urgency, discord_time(from_iso(deadline_iso), "F"),
         ),
-        "",
-        "Use the **Submit my timings** button on the fixture post, or "
-        "**/availability**.",
-        "",
-        "-# Miss the deadline and Officials will allocate a time from your "
-        "team's saved timings instead.",
-    ]
-    return "\n".join(lines)
-
-
-def fixture_confirmed(fixture, slot, roster=()):
-    lines = [
-        "# ⚽ Fixture confirmed",
-        "**{}** vs **{}**  ·  #{}".format(
-            fixture["home_team"], fixture["away_team"], fixture["id"]
-        ),
-        "",
-        _slot_line(fixture["week"], slot),
-        _roster_line(roster),
-    ]
-    if fixture.get("schedule_source") == Source.AUTO_FALLBACK:
-        lines += [
-            "",
-            "-# Allocated automatically from your team's saved timings, because "
-            "the deadline passed without both managers submitting.",
-        ]
-    lines += ["", FOOTER]
-    return "\n".join(lines)
+        footer=("Miss the deadline and Officials will allocate a time from your "
+                "team's saved timings instead."),
+    )
+    return content, embed
 
 
 def _roster_line(roster):
@@ -252,35 +227,9 @@ def referee_claim_prompt(open_count):
     )
 
 
-def no_valid_time(fixture, reason):
-    return "\n".join([
-        "🔴 **Fixture #{} could not be scheduled**".format(fixture["id"]),
-        "{} vs {}".format(fixture["home_team"], fixture["away_team"]),
-        "",
-        reason,
-        "",
-        "Someone needs to sort this one out by hand.",
-    ])
-
-
 # --------------------------------------------------------------------------
 # the master fixture list (spec step 15)
 # --------------------------------------------------------------------------
-
-STATUS_ICON = {
-    "FULLY_CONFIRMED": "✅",
-    "SCHEDULED": "🟠",
-    "NEEDS_MANUAL_REF": "🟠",
-    "NEEDS_MANUAL_SCHEDULING": "🔴",
-    "WAITING_FOR_AVAILABILITY": "🟡",
-}
-
-SOURCE_SHORT = {
-    Source.MANAGER_PREFERENCES: "managers",
-    Source.AUTO_FALLBACK: "auto",
-    "MANUAL": "staff",
-}
-
 
 def board_row(fixture, slot):
     """One fixture line: two badges, then the kickoff.
@@ -526,12 +475,51 @@ def board_digest(bodies):
 # the staff dashboard (spec step 16)
 # --------------------------------------------------------------------------
 
-def dashboard_summary(buckets, week, waiting_on=None, reasons=None, rosters=None):
-    """The exception monitor from spec step 16.
+STATUS_LABEL = {
+    "FULLY_CONFIRMED": "Fully confirmed",
+    "SCHEDULED": "Scheduled, needs officials",
+    "NEEDS_MANUAL_REF": "Needs a referee",
+    "NEEDS_MANUAL_SCHEDULING": "Needs a kickoff time",
+    "WAITING_FOR_AVAILABILITY": "Waiting for availability",
+}
 
-    Counts first, then only what needs a human - and for each of those, who or
-    what is blocking it. "Awaiting response: 2" tells staff nothing actionable;
-    naming the manager who hasn't replied does.
+SOURCE_LABEL = {
+    Source.MANAGER_PREFERENCES: "Both managers' picks",
+    Source.AUTO_FALLBACK: "Automatic, from saved timings",
+    "MANUAL": "Set by staff",
+    Source.TEST: "Test mode",
+}
+
+FIELD_LIMIT = 1024   # Discord's cap on one embed field's value
+
+
+def _rows_field(rows, shown=8):
+    """Up to `shown` rows for a field value, with an "and N more" line, and
+    never over Discord's per-field limit however long the rows get."""
+    out, size = [], 0
+    for row in rows[:shown]:
+        if size + len(row) + 1 > FIELD_LIMIT - 40:
+            break
+        out.append(row)
+        size += len(row) + 1
+    if len(rows) > len(out):
+        out.append("_...and {} more_".format(len(rows) - len(out)))
+    return "\n".join(out)
+
+
+def _when(fixture, slot_for):
+    slot = slot_for(fixture["slot_key"]) if (slot_for and fixture["slot_key"]) else None
+    if slot:
+        return "{} {}".format(slot.day[:3], slot.label)
+    return "no kickoff time yet"
+
+
+def dashboard_summary(buckets, week, waiting_on=None, reasons=None, rosters=None,
+                      slot_for=None):
+    """The exception monitor: counts first, then only what needs a human,
+    and for each of those who or what is blocking it. "Awaiting response: 2"
+    tells staff nothing actionable; naming the manager who hasn't replied does.
+    Games are named by their badges and kickoff, never by fixture number.
     """
     waiting_on = waiting_on or {}
     reasons = reasons or {}
@@ -543,67 +531,71 @@ def dashboard_summary(buckets, week, waiting_on=None, reasons=None, rosters=None
         ("🟠", len(buckets["ref_needed"]), "ref needed"),
         ("🔴", len(buckets["no_valid_time"]), "no valid time"),
     ]
-    lines = ["# Scheduling: week of {}".format(week), ""]
-    lines += ["{} **{}** {}".format(icon, n, label) for icon, n, label in counts]
+    embed = BoardEmbed(
+        title="Scheduling: week of {}".format(week),
+        description="\n".join("{} **{}** {}".format(icon, n, label)
+                              for icon, n, label in counts),
+    )
 
     if buckets["no_valid_time"]:
-        lines += ["", "🔴 **No valid time** (needs scheduling by hand)"]
-        for fixture in buckets["no_valid_time"][:8]:
-            lines.append("· **#{}** {} v {}".format(
-                fixture["id"], fixture["home_team"], fixture["away_team"]))
+        rows = []
+        for fixture in buckets["no_valid_time"]:
+            row = _game(fixture)
             why = reasons.get(fixture["id"])
-            if why:
-                lines.append("  -# {}".format(why))
-        lines.append("-# Fix with `/fixture set fixture:<id> slot:<slot>`")
+            rows.append("{} - {}".format(row, why) if why else row)
+        embed.fields.append(("🔴 No valid time", _rows_field(rows)
+                             + "\n_Fix by hand with /fixture set._", False))
 
     if buckets["ref_needed"]:
-        lines += ["", "🟠 **Ref needed**"]
-        for fixture in buckets["ref_needed"][:8]:
-            assistants = [r for r in (rosters.get(fixture["id"]) or []) if r["role"] == ROLE_AR]
-            tail = ("  -# {} assistant(s) already claimed".format(len(assistants))
+        rows = []
+        for fixture in buckets["ref_needed"]:
+            assistants = [r for r in (rosters.get(fixture["id"]) or [])
+                          if r["role"] == ROLE_AR]
+            tail = (" - {} already claimed".format(plural(len(assistants), "assistant"))
                     if assistants else "")
-            lines.append("· **#{}** {} v {}: {}{}".format(
-                fixture["id"], fixture["home_team"], fixture["away_team"],
-                fixture["slot_key"] or "no time", tail))
-        lines.append("-# Claim it in the referee channel, or fix by hand with "
-                     "`/refs assign fixture:<id> user:@ref`")
+            rows.append("{} - {}{}".format(_game(fixture), _when(fixture, slot_for), tail))
+        embed.fields.append(("🟠 Ref needed", _rows_field(rows)
+                             + "\n_Claim it in the referee channel, or use /refs assign._",
+                             False))
 
     if buckets["awaiting"]:
-        lines += ["", "🟡 **Awaiting response**"]
-        for fixture in buckets["awaiting"][:8]:
+        rows = []
+        for fixture in buckets["awaiting"]:
             missing = waiting_on.get(fixture["id"]) or []
             who = ", ".join("<@{}>".format(m) for m in missing) or "nobody"
-            lines.append("· **#{}** {} v {}, waiting on {}".format(
-                fixture["id"], fixture["home_team"], fixture["away_team"], who))
-
-    for key in ("no_valid_time", "ref_needed", "awaiting"):
-        if len(buckets[key]) > 8:
-            lines.append("-# …and {} more {}".format(len(buckets[key]) - 8,
-                                                     key.replace("_", " ")))
+            rows.append("{} - waiting on {}".format(_game(fixture), who))
+        embed.fields.append(("🟡 Awaiting response", _rows_field(rows), False))
 
     if not any(buckets[k] for k in ("no_valid_time", "ref_needed", "awaiting")):
-        lines += ["", "Nothing needs attention. ✅"]
-    return "\n".join(lines)
+        embed.description += "\n\nNothing needs attention. ✅"
+    return embed
 
 
 def fixture_detail(fixture, history, slot=None, roster=()):
-    lines = [
-        "# Fixture #{}".format(fixture["id"]),
-        "**{}** vs **{}**".format(fixture["home_team"], fixture["away_team"]),
-        "",
-        "Competition: `{}`  ·  week of {}".format(fixture["competition"], fixture["week"]),
-        "Status: `{}`".format(fixture["status"]),
-        "Deadline: {}".format(discord_time(from_iso(fixture["deadline"]))),
+    """One game for staff: who is playing, where it stands, and the log of
+    what the automation has done to it."""
+    embed = BoardEmbed(
+        title="Game details",
+        description="{}\n**{}** vs **{}**".format(
+            _game(fixture), fixture["home_team"], fixture["away_team"]),
+    )
+    kickoff = (discord_time(slot_datetime(fixture["week"], slot), "F")
+               if slot else "Not set yet")
+    embed.fields += [
+        ("Status", STATUS_LABEL.get(fixture["status"], fixture["status"]), True),
+        ("Kickoff", kickoff, True),
+        ("Deadline", discord_time(from_iso(fixture["deadline"]), "F"), True),
     ]
     if slot:
-        lines.append("Kickoff: {}".format(_slot_line(fixture["week"], slot)))
-        lines.append("Chosen by: `{}`".format(fixture["schedule_source"]))
+        embed.fields.append(
+            ("Chosen by", SOURCE_LABEL.get(fixture["schedule_source"],
+                                           fixture["schedule_source"] or "-"), True))
     if roster:
-        lines.append(_roster_line(roster))
-
+        embed.fields.append(("Officials", _roster_line(roster), False))
     if history:
-        lines += ["", "**Scheduling log**"]
-        for entry in history[-15:]:
-            detail = ": {}".format(entry["detail"]) if entry["detail"] else ""
-            lines.append("`{}`  {}{}".format(entry["at"][11:16], entry["event"], detail))
-    return "\n".join(lines)
+        rows = ["`{}` {}{}".format(
+            entry["at"][11:16], entry["event"],
+            ": {}".format(entry["detail"]) if entry["detail"] else "")
+            for entry in history[-10:]]
+        embed.fields.append(("Scheduling log", _rows_field(rows, shown=10), False))
+    return embed
