@@ -26,7 +26,7 @@ STAT_EMOJI = {
     "assist": "👁️",
     "yellow": "🟨",
     "red": "🟥",
-    "sub": "🔁",
+    "sub": "🔁",       # shown as "🔁 '75 ON" / "🔁 '75 OFF"; see parse_line
     "nosub": "🚫",      # unused player
     "pen_scored": "🟢",
     "pen_missed": "🔴",
@@ -37,13 +37,14 @@ TOKENS = {
     "a": "assist", "ast": "assist", "assist": "assist", "assists": "assist",
     "yc": "yellow", "yellow": "yellow",
     "rc": "red", "red": "red",
-    "sub": "sub",
     "nosub": "nosub", "unused": "nosub",
     "ps": "pen_scored", "pm": "pen_missed",
 }
 
-TOKEN_HELP = ("g goal, a assist, yc yellow, rc red, sub subbed on/off, nosub unused, "
-              "ps scored pen, pm missed pen (g3 = three goals)")
+TOKEN_HELP = ("g goal, a assist, yc yellow, rc red, on75 / off75 subbed on or off at "
+              "75', nosub unused, ps scored pen, pm missed pen (g3 = three goals)")
+SUB_HELP = ("A sub needs the minute and ON or OFF, like on75 or off60 "
+            "(added time works too: on90+3).")
 
 # MOTM gets the trophy, the next three mentions the medals, in the order typed.
 PLACINGS = ["🏆", "🥇", "🥈", "🥉"]
@@ -51,6 +52,9 @@ MAX_MENTIONS = 10
 DESCRIPTION_LIMIT = 4000   # an embed description holds 4096
 
 _TOKEN = re.compile(r"^(\d*)([a-z]+)(\d*)$")
+_MINUTE = r"(\d{1,3}(?:\+\d{1,2})?)"
+_SUB_A = re.compile(r"^(on|off)" + _MINUTE + "$", re.IGNORECASE)   # on75
+_SUB_B = re.compile(r"^" + _MINUTE + r"(on|off)$", re.IGNORECASE)  # 75on
 _BENCH = re.compile(r"^bench:?$", re.IGNORECASE)
 
 
@@ -67,6 +71,14 @@ def parse_line(line):
     name = parts[0].lstrip("@")
     keys, bad = [], []
     for raw in parts[1:]:
+        sub = _SUB_A.match(raw)
+        if sub:
+            keys.append("sub:{}:{}".format(sub.group(1).lower(), sub.group(2)))
+            continue
+        sub = _SUB_B.match(raw)
+        if sub:
+            keys.append("sub:{}:{}".format(sub.group(2).lower(), sub.group(1)))
+            continue
         match = _TOKEN.match(raw.lower())
         if not match:
             bad.append(raw)
@@ -83,6 +95,14 @@ def parse_line(line):
 
 def lines_of(text):
     return [l.strip() for l in (text or "").splitlines() if l.strip()]
+
+
+def show(key):
+    """The emoji (and for a sub the minute and direction) a stat key prints as."""
+    if key.startswith("sub:"):
+        _, direction, minute = key.split(":")
+        return "{} '{} {}".format(STAT_EMOJI["sub"], minute, direction.upper())
+    return STAT_EMOJI[key]
 
 
 def _row(team, text):
@@ -150,8 +170,10 @@ def build(fixture, home_score, away_score, stats_home, stats_away, motm,
                 continue
             name, keys, bad = parse_line(line)
             if bad:
-                problems.append("**{}**: I don't know {}. Use {}.".format(
-                    name, ", ".join("`{}`".format(b) for b in bad), TOKEN_HELP))
+                problems.append("**{}**: I don't know {}. {}".format(
+                    name, ", ".join("`{}`".format(b) for b in bad),
+                    SUB_HELP if any(b.lower() == "sub" for b in bad)
+                    else "Use " + TOKEN_HELP + "."))
                 continue
             record = check(name, club)
             if record:
@@ -164,7 +186,7 @@ def build(fixture, home_score, away_score, stats_home, stats_away, motm,
                 rows.append(label)
             for name, keys in sorted(group, key=_stat_order):
                 rows.append(_row(club, " ".join(
-                    [esc(name)] + [STAT_EMOJI[k] for k in keys])))
+                    [esc(name)] + [show(k) for k in keys])))
         return rows
 
     home_rows = team_block(stats_home, home)

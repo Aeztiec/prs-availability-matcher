@@ -61,8 +61,11 @@ check("suggests a close match", SHEET.suggest("vzcad"), ["vzcadc"])
 print("\nparsing a line")
 check("goals, assist", parse_line("vzcadc g g a"), ("vzcadc", ["goal", "goal", "assist"], []))
 check("counts either side", parse_line("x g3 2a")[1], ["goal"] * 3 + ["assist"] * 2)
-check("cards, sub, unused", parse_line("x yc rc sub nosub")[1],
-      ["yellow", "red", "sub", "nosub"])
+check("cards and unused", parse_line("x yc rc nosub")[1], ["yellow", "red", "nosub"])
+check("subbed on at a minute", parse_line("x on75")[1], ["sub:on:75"])
+check("subbed off, minute first", parse_line("x 60off")[1], ["sub:off:60"])
+check("added time works", parse_line("x off90+3")[1], ["sub:off:90+3"])
+check("a bare sub is rejected, the minute is compulsory", parse_line("x sub")[2], ["sub"])
 check("penalties", parse_line("x ps pm")[1], ["pen_scored", "pen_missed"])
 check("unknown token is flagged", parse_line("x banana")[2], ["banana"])
 check("blank line is nothing", parse_line("   "), None)
@@ -81,7 +84,7 @@ check("with a shootout", score_line(FIXTURE, 3, 3, (5, 4)),
 print("\nbuilding the post")
 text, problems = build(
     FIXTURE, 5, 0,
-    "danielfly a\nvzcadc g g\n_gawa g a yc\nBENCH\nbenchguy sub",
+    "danielfly a\nvzcadc g g\n_gawa g a yc\nBENCH\nbenchguy on70",
     "FelipeF\nom_ena rc",
     "_gawa - hat trick\nFelipeF", "moh1d - Main Referee [Full 90']\nj5rdi - Assistant Referee [Full 90']",
     SHEET)
@@ -92,7 +95,7 @@ check("most goals first, then assists, ties keep typed order",
       [r.split(" | ")[1] for r in rows_of(text, "**STATISTICS:**")[:3]],
       ["vzcadc ⚽ ⚽", "\\_gawa ⚽ 👁️ 🟨", "danielfly 👁️"])
 check("bench has its own bold heading under the starters",
-      rows_of(text, "**STATISTICS:**")[3:], ["**BENCH:**", "{} | benchguy 🔁".format(PORTO)])
+      rows_of(text, "**STATISTICS:**")[3:], ["**BENCH:**", "{} | benchguy 🔁 '70 ON".format(PORTO)])
 check("team 2 is its own block with no bench when there is none",
       text.split("\n\n")[3].splitlines()[0], "{} | FelipeF".format(PSG))
 check("underscore usernames are escaped, not italic", "\\_gawa" in text, True)
@@ -117,6 +120,8 @@ check("a player on the wrong team", wrong_team,
       ["**nobody_fc** plays for Arsenal, not Fc Porto."])
 _, unknown = build(FIXTURE, 1, 0, "vzcad g", "", "", "", SHEET)
 check("a mistyped name gets a suggestion", "did you mean vzcadc" in unknown[0], True)
+_, bare_sub = build(FIXTURE, 1, 0, "vzcadc sub", "", "", "", SHEET)
+check("a bare sub explains the minute and ON/OFF", "on75" in bare_sub[0], True)
 _, bad_token = build(FIXTURE, 1, 0, "vzcadc banana", "", "", "", SHEET)
 check("a bad token says what is allowed", "`banana`" in bad_token[0], True)
 _, mention_outsider = build(FIXTURE, 1, 0, "", "", "nobody_fc", "", SHEET)

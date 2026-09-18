@@ -1389,10 +1389,10 @@ def register(bot):
 
             # The stat codes sit in the box labels so the guide is on screen
             # while filling the form in; BENCH is spelled out in the box itself.
-            self.home = box("{} stats: g a yc rc sub nosub ps pm".format(
+            self.home = box("{} stats: g a yc rc on75 off75 nosub ps pm".format(
                 code(fixture["home_team"])), starting_lines(fixture["home_team"]),
                 "username g g a")
-            self.away = box("{} stats: g a yc rc sub nosub ps pm".format(
+            self.away = box("{} stats: g a yc rc on75 off75 nosub ps pm".format(
                 code(fixture["away_team"])), starting_lines(fixture["away_team"]),
                 "username g g a")
             self.motm = box("MOTM & mentions: best first, 🏆 🥇 🥈 🥉",
