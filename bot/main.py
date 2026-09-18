@@ -1354,19 +1354,17 @@ def register(bot):
 
     RESULT_GUIDE = chr(10).join([
         "### Result form",
-        "One player per line, with codes after the name: `vzcadc g g a`.",
+        "One player per line, codes after the name: `vzcadc g g a`",
         "",
-        "**Codes**",
         "- `g` goal, `a` assist",
         "- `yc` yellow, `rc` red",
-        "- `on75` / `off75` subbed on / off at 75' (minute required)",
-        "- `nosub` unused player",
+        "- `on75` / `off75` sub on / off (minute required)",
         "- `ps` / `pm` shootout penalty scored / missed",
-        "- `g3` three goals",
+        "- `nosub` unused, `g3` three goals",
         "",
-        "**Lineups** are pre-filled. Reorder them to match who started and who "
-        "came on, keeping substitutes under `BENCH`, and remove anyone who did not play.",
-        "**MOTM:** best first (🏆 🥇 🥈 🥉). Add a note after a dash.",
+        "**Lineups:** pre-filled. Reorder to match who started, keep substitutes "
+        "under `BENCH`, and remove anyone who did not play.",
+        "**MOTM:** best first (🏆 🥇 🥈 🥉). Optional note after a dash.",
     ])
 
     def starting_lines(club):
