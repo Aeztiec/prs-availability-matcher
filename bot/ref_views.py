@@ -105,7 +105,7 @@ class ClaimSelect(
         fixture = store.fixture(int(chosen))
         if not fixture:
             await interaction.response.send_message(
-                "That fixture no longer exists.", ephemeral=True
+                "That game no longer exists.", ephemeral=True
             )
             return
         try:

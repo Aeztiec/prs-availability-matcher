@@ -211,7 +211,6 @@ fid1, home1, away1 = create("ARS", "MCI")
 fixture = store.fixture(fid1)
 say("")
 say("    {} vs {}   fixture #{}".format(home1, away1, fid1))
-show_post("#availability", notify.ask_for_availability(fixture, to_iso(gw.deadline)))
 say("    Both managers click [Set availability] and fill the selector in.")
 
 home_picks = {"sat_1800": Pref.IDEAL, "sat_1830": Pref.IDEAL, "sun_1700": Pref.FINE}

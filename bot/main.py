@@ -709,74 +709,6 @@ def register(bot):
                             bot.offerable_slots(mine[0]["gameweek"]))
 
     # ------------------------------------------------------------- fixtures
-    @fixture_group.command(name="create", description="Create a fixture and post it here")
-    @app_commands.describe(
-        home="Home team, as named in the timings sheet",
-        away="Away team, as named in the timings sheet",
-        home_manager="Home team's manager",
-        away_manager="Away team's manager",
-        deadline="e.g. 'Friday 18:00' or '2026-09-11 18:00' (UTC)",
-    )
-    @staff_only()
-    async def fixture_create(interaction, home: str, away: str,
-                             home_manager: discord.User, away_manager: discord.User,
-                             deadline: str):
-        await interaction.response.defer(ephemeral=True)
-
-        # Fail before creating anything: a fixture whose teams aren't in the
-        # sheet can never use the fallback, which is most of its safety net.
-        problems = []
-        resolved = {}
-        for label, name in (("home", home), ("away", away)):
-            try:
-                resolved[label] = bot.timings.find_team(name).country
-            except LookupError as error:
-                problems.append("{}: {}".format(label, error))
-        try:
-            when = parse_deadline(deadline)
-        except ValueError as error:
-            problems.append(str(error))
-            when = None
-        if resolved.get("home") and resolved.get("home") == resolved.get("away"):
-            problems.append("A team can't play itself.")
-        if home_manager.id == away_manager.id:
-            problems.append("Both managers are the same person.")
-
-        if problems:
-            await interaction.followup.send(
-                "Couldn't create that fixture:\n" + "\n".join("· " + p for p in problems),
-                ephemeral=True,
-            )
-            return
-
-        week = week_of(when)
-        fixture_id = store.create_fixture(
-            bot.timings.competition.key, week,
-            resolved["home"], resolved["away"],
-            home_manager.id, away_manager.id, to_iso(when),
-            Status.WAITING_FOR_AVAILABILITY,
-        )
-        fixture = store.fixture(fixture_id)
-
-        # Posted, not DM'd: the fixture appears on the week's announcement,
-        # and its managers use the same button as everyone else. The button
-        # opens the same weekly selector /availability does, in case either
-        # manager already has another fixture of their own that week.
-        posted = await bot.post(
-            interaction.channel,
-            embed=_discord_embed(notify.ask_for_availability(fixture, to_iso(when))),
-            view=opener(Target(SCOPE_FIXTURE, week)),
-        )
-        await interaction.followup.send(
-            "Created **{} vs {}**, deadline {}.\n{}".format(
-                resolved["home"], resolved["away"],
-                when.strftime("%a %d %b %H:%M UTC"),
-                "Posted here with a submit button."
-                if posted else "⚠️ Couldn't post here. Check my permissions.",
-            ),
-            ephemeral=True,
-        )
-
     @fixture_group.command(name="list", description="Scheduling status for a week")
     @app_commands.describe(week="Saturday of the weekend, YYYY-MM-DD. Defaults to the next one.")
     @staff_only()
@@ -837,13 +769,6 @@ def register(bot):
         )
 
     fixture_show.autocomplete("game")(game_autocomplete())
-
-    @fixture_group.command(name="run", description="Run a scheduling pass now")
-    @staff_only()
-    async def fixture_run(interaction, week: str = None):
-        await interaction.response.defer(ephemeral=True)
-        await bot.process(week=week)
-        await bot.show_dashboard(interaction, week or bot.current_week(), followup=True)
 
     @fixture_group.command(name="set", description="Set a kickoff time by hand")
     @app_commands.describe(
@@ -1192,10 +1117,13 @@ def register(bot):
                 missing.append("{} ({})".format(code, name))
         if missing:
             await interaction.followup.send(
-                "These teams have no manager registered, so their fixtures "
-                "can't be created:\n{}\n\nAdd them with "
-                "`/managers set team:<name> user:@manager`.".format(
-                    ", ".join(sorted(missing))),
+                embed=_discord_embed(notify.BoardEmbed(
+                    title="{} can't open yet".format(gw.label),
+                    description=("These teams have no manager registered, so their "
+                                 "fixtures can't be created:" + chr(10) * 2
+                                 + ", ".join(sorted(missing))),
+                    footer="Add them with /managers set.",
+                )),
                 ephemeral=True,
             )
             return
@@ -1227,8 +1155,8 @@ def register(bot):
             log.warning("could not post the announcement: %s", error)
 
         deadline_local, deadline_label = uk_time(gw.deadline)
-        parts = ["Opened **{}**: {} created, deadline {} {}.".format(
-            gw.key, plural(len(made), "fixture"), deadline_local.strftime("%a %d %b %H:%M"), deadline_label)]
+        parts = ["{} created. Deadline: {} {}.".format(
+            plural(len(made), "fixture").capitalize(), deadline_local.strftime("%a %d %b %H:%M"), deadline_label)]
         if test:
             parts.append("-# TEST MODE: {} given a random kickoff time - "
                          "availability was skipped entirely.".format(
@@ -1246,7 +1174,11 @@ def register(bot):
                              count, len(gw.fixtures) + len(gw.uefa_fixtures)))
         if skipped:
             parts.append("Skipped {}: {}".format(len(skipped), ", ".join(skipped[:8])))
-        await interaction.followup.send("\n".join(parts), ephemeral=True)
+        await interaction.followup.send(
+            embed=_discord_embed(notify.BoardEmbed(
+                title="{} opened".format(gw.label), description=chr(10).join(parts))),
+            ephemeral=True,
+        )
 
     @gw_group.command(name="close", description="Stop managers scheduling this gameweek")
     @staff_only()

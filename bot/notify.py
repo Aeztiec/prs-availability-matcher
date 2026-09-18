@@ -46,24 +46,6 @@ LEGEND_LINE = ("**How to mark each time slot:**" + chr(10) + "⚪ No" + chr(10)
                + "🟡 Fine" + chr(10) + "🟢 Ideal")
 
 
-def ask_for_availability(fixture, deadline_iso):
-    """The post for a single fixture made by hand with /fixture create: what
-    it is and by when. A whole gameweek is announced by fixture_board instead."""
-    return BoardEmbed(
-        title="New fixture: needs a kickoff time",
-        description=(
-            "{}\n\n"
-            "Use the button below to submit the times your team can play. The "
-            "selector opens privately, so only you can see your responses.\n\n"
-            "{}\n\n"
-            "You can change your answers until the deadline."
-        ).format(_game(fixture), LEGEND_LINE),
-        fields=[("Deadline", discord_time(from_iso(deadline_iso), "F"), False)],
-        footer=("If neither manager replies, Officials will allocate a time from "
-                "your teams' saved timings."),
-    )
-
-
 def reminder(fixture, deadline_iso, which, managers=()):
     """A public nudge for whoever still owes an answer: (content, embed).
 
@@ -120,13 +102,20 @@ def tag_width(leagues):
     return max([MIN_TAG_WIDTH] + [len(c) for c in codes])
 
 
-def league_tag(league, width=MIN_TAG_WIDTH):
+def league_tag(league, width=MIN_TAG_WIDTH, logo=False):
     """`(DOME)`, `(UEFA)`, `(DOM)`, `(UCL)` ... - which competition a fixture
-    is in, padded or cut to `width` letters so a board's tags line up."""
+    is in, padded or cut to `width` letters so a board's tags line up.
+
+    With logo=True the competition's badge follows the tag (the UEFA logo, or
+    the fixture's own league). Every row gets one, so the badges after it
+    still start in the same place. Outside the code span, since custom emoji
+    do not render inside backticks."""
     if not league:
         return ""
     label = "DOMESTIC" if league in season.LEAGUES else league
-    return "`({})` ".format(label[:width].ljust(width))
+    tag = "`({})` ".format(label[:width].ljust(width))
+    badge = season.competition_emoji(league) if logo else ""
+    return tag + badge + " " if badge else tag
 
 
 def referee_board_row(fixture, slot, week, roster=(), tag_letters=MIN_TAG_WIDTH):
@@ -139,7 +128,7 @@ def referee_board_row(fixture, slot, week, roster=(), tag_letters=MIN_TAG_WIDTH)
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
     when = discord_time(slot_datetime(week, slot), "F")
-    tag = league_tag(fixture.get("league"), tag_letters)
+    tag = league_tag(fixture.get("league"), tag_letters, logo=True)
     who = " ".join("<@{}>".format(r["referee_id"]) for r in roster) if roster else "_open_"
     return "{}{} *vs* {} @ {} {}".format(tag, home, away, when, who)
 
@@ -296,8 +285,8 @@ def fixture_board(fixtures, week, slot_for,
         # left behind after its emoji was deleted - just renders its name;
         # Discord prints a dead reference as raw text otherwise.
         division = "**__{}:__**".format(season.LEAGUES.get(key, key))
-        badge = season.LEAGUE_EMOJI.get(key)
-        if season.usable_emoji(badge):
+        badge = season.competition_emoji(key)
+        if badge:
             division = "{}  {}".format(division, badge)
         lines.append(division)
 

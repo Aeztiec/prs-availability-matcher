@@ -468,17 +468,13 @@ check("a team with one shows only the badge",
 print(chr(10) + "shared wording helpers and the other staff/manager embeds")
 # --------------------------------------------------------------------------
 from bot.text import plural
-from bot.notify import ask_for_availability, reminder, fixture_detail, _rows_field
+from bot.notify import reminder, fixture_detail, _rows_field
 
 check("one", plural(1, "game"), "1 game")
 check("many", plural(3, "game"), "3 games")
 check("zero", plural(0, "claim"), "0 claims")
 
 fx = store.fixture(fid)
-ask = ask_for_availability(fx, "2026-09-11T18:00:00Z")
-check("ask is an embed", ask.title, "New fixture: needs a kickoff time")
-check("ask has a deadline field", ask.fields[0][0], "Deadline")
-
 content, rem = reminder(fx, "2026-09-11T18:00:00Z", "2h", managers=[52])
 check("reminder pings in content", content, "<@52>")
 check("reminder titled", rem.title, "Reminder: submit your timings")

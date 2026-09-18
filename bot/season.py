@@ -203,6 +203,13 @@ LEAGUES = {
 # league_tag() labels anything not in LEAGUES "UEFA" for display, and that
 # only works because this code is deliberately absent from that dict.
 UEFA_LEAGUE = "UEFA"
+UEFA_TAG_EMOJI = "<:UEFA:1550535644080508969>"
+
+
+def competition_emoji(league):
+    """The logo for a league code, UEFA included, or "" if it has no usable one."""
+    emoji = UEFA_TAG_EMOJI if league == UEFA_LEAGUE else LEAGUE_EMOJI.get(league)
+    return emoji if usable_emoji(emoji) else ""
 
 
 # home, away, league - transcribed from the published gameweek fixture lists.
