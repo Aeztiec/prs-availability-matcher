@@ -1384,11 +1384,19 @@ def register(bot):
                 self.add_item(item)
                 return item
 
-            self.home = box("{} stats".format(fixture["home_team"].title()),
-                            starting_lines(fixture["home_team"]), "username g g a")
-            self.away = box("{} stats".format(fixture["away_team"].title()),
-                            starting_lines(fixture["away_team"]), "username g g a")
-            self.motm = box("MOTM & mentions", placeholder="username - short note (optional)")
+            def code(team):
+                return season.team_code(team) or team.title()
+
+            # The stat codes sit in the box labels so the guide is on screen
+            # while filling the form in; BENCH is spelled out in the box itself.
+            self.home = box("{} stats: g a yc rc sub nosub ps pm".format(
+                code(fixture["home_team"])), starting_lines(fixture["home_team"]),
+                "username g g a")
+            self.away = box("{} stats: g a yc rc sub nosub ps pm".format(
+                code(fixture["away_team"])), starting_lines(fixture["away_team"]),
+                "username g g a")
+            self.motm = box("MOTM & mentions: best first, 🏆 🥇 🥈 🥉",
+                            placeholder="username - short note (optional)")
             def roblox_name(row):
                 """The Roblox username staff registered them with, else their
                 Discord name if it matches someone on the sheet, else the
@@ -1427,7 +1435,7 @@ def register(bot):
                 "Result posted." if posted else
                 "⚠️ Couldn't post here. Check my permissions.", ephemeral=True)
 
-    @tree.command(name="result", description="Post a finished game's result")
+    @tree.command(name="result", description="Post a game's result: pick the game, score, then fill in the form")
     @app_commands.describe(
         game="The game - pick from the list as you type",
         home_score="Home team's goals",
