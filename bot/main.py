@@ -1352,6 +1352,14 @@ def register(bot):
 
     STARTERS = 7
 
+    RESULT_GUIDE = (
+        "**Stats:** one player per line, codes after the name (`vzcadc g g a`)." + chr(10)
+        + "`g` goal, `a` assist, `yc` yellow, `rc` red, `nosub` unused player." + chr(10)
+        + "`on75` / `off75` subbed on or off at 75' (the minute is required)." + chr(10)
+        + "`ps` / `pm` scored / missed shootout penalty. `g3` means three goals." + chr(10)
+        + "Everyone under the **BENCH** line is a substitute." + chr(10)
+        + "**MOTM:** best first, they get 🏆 then 🥇 🥈 🥉. Add a note after ` - `.")
+
     def starting_lines(club):
         """The club's sheet players: the first seven as starters, then a BENCH
         line and the rest. Staff prune it down to who actually played."""
@@ -1376,26 +1384,27 @@ def register(bot):
             self.scores = (home_score, away_score)
             self.pens = pens
 
+            # The how-to sits as a note at the top of the form, so the box
+            # labels stay clean.
+            self.add_item(discord.ui.TextDisplay(RESULT_GUIDE))
+
             def box(label, default="", placeholder=None):
                 item = discord.ui.TextInput(
-                    label=label[:45], style=discord.TextStyle.paragraph,
-                    default=default[:4000], required=False, max_length=4000,
-                    placeholder=placeholder)
-                self.add_item(item)
+                    style=discord.TextStyle.paragraph, default=default[:4000],
+                    required=False, max_length=4000, placeholder=placeholder)
+                self.add_item(discord.ui.Label(text=label[:45], component=item))
                 return item
 
             def code(team):
                 return season.team_code(team) or team.title()
 
-            # The stat codes sit in the box labels so the guide is on screen
-            # while filling the form in; BENCH is spelled out in the box itself.
-            self.home = box("{} stats: g a yc rc on75 off75 nosub ps pm".format(
+            self.home = box("{} stats".format(
                 code(fixture["home_team"])), starting_lines(fixture["home_team"]),
                 "username g g a")
-            self.away = box("{} stats: g a yc rc on75 off75 nosub ps pm".format(
+            self.away = box("{} stats".format(
                 code(fixture["away_team"])), starting_lines(fixture["away_team"]),
                 "username g g a")
-            self.motm = box("MOTM & mentions: best first, 🏆 🥇 🥈 🥉",
+            self.motm = box("MOTM & mentions",
                             placeholder="username - short note (optional)")
             def roblox_name(row):
                 """The Roblox username staff registered them with, else their
