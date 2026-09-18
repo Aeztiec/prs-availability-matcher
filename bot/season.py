@@ -29,9 +29,13 @@ SEASON = "S17"
 # How the season reads in a public post's heading: "PRS SEASON 17 GAMEWEEK 1:".
 SEASON_LABEL = "SEASON 17"
 
-# The league's brand colour, used on every embed the bot sends - one place to
-# change it rather than a hex code copied into each call site.
+# The league's brand colours, used on every embed the bot sends - one place
+# to change them rather than a hex code copied into each call site.
+# EMBED_COLOR is the default (the "action" boards: managers submitting
+# timings, referees claiming a game). FIXTURE_EMBED_COLOR is for boards that
+# list actual fixtures - the gameweek announcement and the referee board.
 EMBED_COLOR = 0x0E1328
+FIXTURE_EMBED_COLOR = 0x35C6C8
 
 # Optional emoji after the heading and after each division name, the way the
 # league's own posts do it. Upload one named after the league code below (PL,

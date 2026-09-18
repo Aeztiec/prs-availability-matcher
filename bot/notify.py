@@ -30,12 +30,15 @@ class BoardEmbed:
     this module. The caller (main.py) turns it into a real embed only when it
     actually sends something.
 
-    `fields` is a list of (name, value, inline) triples.
+    `fields` is a list of (name, value, inline) triples. `color` is None to
+    mean "the default brand colour" - only a board that lists actual
+    fixtures overrides it, see season.FIXTURE_EMBED_COLOR.
     """
     description: str
     title: str = None
     fields: list = field(default_factory=list)
     footer: str = None
+    color: int = None
 
 
 def _slot_line(week, slot):
@@ -202,6 +205,7 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
         return [BoardEmbed(
             description=header + "\n\n_No fixtures have a kickoff time yet._",
             footer=footer_text,
+            color=season.FIXTURE_EMBED_COLOR,
         )]
 
     lines = [header, ""]
@@ -213,7 +217,8 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
                 fixture, slot, week, rosters.get(fixture["id"])))
         lines.append("")
 
-    embeds = [BoardEmbed(description=d) for d in _chunk_description(lines)]
+    embeds = [BoardEmbed(description=d, color=season.FIXTURE_EMBED_COLOR)
+             for d in _chunk_description(lines)]
     embeds[-1].footer = footer_text
     return embeds
 
@@ -348,7 +353,8 @@ def fixture_board(fixtures, week, slot_for,
         lines.append("_No fixtures for this gameweek yet._")
         lines.append("")
 
-    embeds = [BoardEmbed(description=d) for d in _chunk_description(lines)]
+    embeds = [BoardEmbed(description=d, color=season.FIXTURE_EMBED_COLOR)
+             for d in _chunk_description(lines)]
 
     if deadline is not None:
         embeds[-1].fields = [
