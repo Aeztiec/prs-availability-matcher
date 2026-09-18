@@ -361,24 +361,27 @@ finally:
     _season.LEAGUE_EMOJI = real_league
     _season.SEASON_EMOJI = real_season
 
-print("\nthe DOM/UEFA tag switches to an emoji once one is uploaded")
-check("blank by default - the text tag, not a stray space or crash",
-      league_tag("PL"), "`(DOM)` ")
+print("\nthe DOM/UEFA tag carries the league's own emoji inside the brackets")
+check("a domestic fixture shows its league's emoji",
+      league_tag("PL"), "(DOM {}) ".format(_season.LEAGUE_EMOJI["PL"]))
+check("a different league shows its own",
+      league_tag("SA"), "(DOM {}) ".format(_season.LEAGUE_EMOJI["SA"]))
+check("UEFA shows the UEFA emoji",
+      league_tag("UEFA"), "(UEFA {}) ".format(_season.UEFA_TAG_EMOJI))
+check("no backticks - custom emoji don't render inside a code span",
+      "`" in league_tag("PL") or "`" in league_tag("UEFA"), False)
 check("no league at all is just blank", league_tag(None), "")
-real_domestic_tag = _season.DOMESTIC_TAG_EMOJI
+real_league_emoji = dict(_season.LEAGUE_EMOJI)
 real_uefa_tag = _season.UEFA_TAG_EMOJI
-_season.DOMESTIC_TAG_EMOJI = "<:DOM:111>"
-_season.UEFA_TAG_EMOJI = "<:UCL:222>"
+_season.LEAGUE_EMOJI = {}
+_season.UEFA_TAG_EMOJI = ""
 try:
-    check("a configured domestic emoji replaces the text tag",
-          league_tag("PL"), "<:DOM:111> ")
-    check("a configured UEFA emoji replaces the text tag",
-          league_tag("UEFA"), "<:UCL:222> ")
+    check("a league with no usable emoji falls back to the bare word",
+          league_tag("PL"), "(DOM) ")
+    check("UEFA does too", league_tag("UEFA"), "(UEFA) ")
 finally:
-    _season.DOMESTIC_TAG_EMOJI = real_domestic_tag
+    _season.LEAGUE_EMOJI = real_league_emoji
     _season.UEFA_TAG_EMOJI = real_uefa_tag
-check("restored to the text tag once unset",
-      league_tag("UEFA"), "`(UEFA)` ")
 
 print("\nthe deadline fields and footer stay on the last embed, even split")
 footer_store = fresh_store()
