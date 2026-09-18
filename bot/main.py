@@ -39,6 +39,20 @@ from .weeks import (
 
 log = logging.getLogger("prsbot")
 
+
+def _discord_embed(board_embed):
+    """Turn a notify.BoardEmbed - plain, testable data - into the real
+    discord.Embed object the API actually wants. Kept to this one spot so
+    nothing else in this module needs to know discord.Embed's shape."""
+    embed = discord.Embed(description=board_embed.description)
+    if board_embed.title:
+        embed.title = board_embed.title
+    if board_embed.footer:
+        embed.set_footer(text=board_embed.footer)
+    for name, value, inline in board_embed.fields:
+        embed.add_field(name=name, value=value, inline=inline)
+    return embed
+
 # How often the deadline runner wakes. Deadlines are hours away, so a few
 # minutes of lag is irrelevant - and a short interval keeps each pass tiny.
 TICK_MINUTES = 5
@@ -257,16 +271,15 @@ class PRSBot(discord.Client):
         return view
 
     def ref_board_payload(self, week):
-        """The board text(s), the claim-prompt text, its view, and a digest
+        """The board embeds, the claim-prompt text, its view, and a digest
         of all of it together - so publish and refresh always agree on
         whether anything actually changed."""
         fixtures = self.store.fixtures(week=week)
         rosters = {f["id"]: self.store.fixture_referees(f["id"]) for f in fixtures}
         gw = next((g for g in season.ALL if g.week == week), None)
-        mention = "<@&{}>".format(config.REFEREE_ROLE_ID) if config.REFEREE_ROLE_ID else None
         bodies = notify.referee_board(
             fixtures, week, self.slot, rosters=rosters, gameweek=gw,
-            competition=self.timings.competition.competition, mention=mention,
+            competition=self.timings.competition.competition,
         )
         pending = self.fixtures_needing_referee(week=week)
         prompt = notify.referee_claim_prompt(len(pending))
@@ -275,17 +288,20 @@ class PRSBot(discord.Client):
         return bodies, prompt, view, digest
 
     async def publish_ref_board(self, week, channel):
-        """Post the referee board, and the claim menu under it."""
+        """Post the referee board (one message, one embed per day), and the
+        claim menu under it."""
         bodies, prompt, view, digest = self.ref_board_payload(week)
-        # Only this first post is allowed to ping the referee role - later
-        # edits stay quiet, same rule as the fixture board.
+        # Spoilered so it still notifies the role without shouting at the top
+        # of the post - same idea the old text board used.
+        mention = ("<@&{}>".format(config.REFEREE_ROLE_ID)
+                  if config.REFEREE_ROLE_ID else None)
+        content = "||{}||".format(mention) if mention else None
         pinging = discord.AllowedMentions(everyone=False, roles=True, users=False)
         quiet = discord.AllowedMentions.none()
-        sent = []
-        for index, body in enumerate(bodies):
-            sent.append(await channel.send(
-                body, allowed_mentions=pinging if index == 0 else quiet
-            ))
+        sent = [await channel.send(
+            content=content, embeds=[_discord_embed(b) for b in bodies],
+            allowed_mentions=pinging,
+        )]
         sent.append(await channel.send(prompt, view=view, allowed_mentions=quiet))
         self.store.set_ref_board(week, channel.id, [m.id for m in sent], digest)
         return sent[0]
@@ -304,26 +320,20 @@ class PRSBot(discord.Client):
         if digest == record.get("digest"):
             return False
         known = self.store.ref_board_message_ids(week)
-        known_board, known_prompt = known[:-1], (known[-1] if known else None)
+        known_board, known_prompt = known[0] if known else None, \
+            (known[1] if len(known) > 1 else None)
         try:
             channel = self.get_channel(record["channel_id"]) or \
                 await self.fetch_channel(record["channel_id"])
             quiet = discord.AllowedMentions.none()
+            embeds = [_discord_embed(b) for b in bodies]
             live = []
-            for index, body in enumerate(bodies):
-                if index < len(known_board):
-                    message = await channel.fetch_message(known_board[index])
-                    if message.content != body:
-                        await message.edit(content=body, allowed_mentions=quiet)
-                    live.append(message.id)
-                else:
-                    live.append((await channel.send(body, allowed_mentions=quiet)).id)
-
-            for stale in known_board[len(bodies):]:
-                try:
-                    await (await channel.fetch_message(stale)).delete()
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    pass
+            if known_board:
+                message = await channel.fetch_message(known_board)
+                await message.edit(embeds=embeds, allowed_mentions=quiet)
+                live.append(message.id)
+            else:
+                live.append((await channel.send(embeds=embeds, allowed_mentions=quiet)).id)
 
             if known_prompt:
                 prompt_message = await channel.fetch_message(known_prompt)
@@ -425,33 +435,29 @@ class PRSBot(discord.Client):
         return notify.fixture_board(
             fixtures, week, self.slot,
             gameweek=gw, deadline=gw.deadline if gw else None,
-            # TEMP: @everyone ping disabled. Re-enable by swapping this back:
-            # mention=config.ANNOUNCE_MENTION or None,
-            mention=None,
             competition=self.timings.competition.competition,
         )
 
     async def publish_board(self, week, channel, with_button=True):
-        """Post the fixture announcement, and the button under it.
+        """Post the fixture announcement (one message, one embed - more only
+        if a huge gameweek needs it), and the button under it.
 
         The button is a separate message so the announcement can be edited
         freely without Discord dropping the components, and so the call to
         action stays at the bottom of the channel where people will see it.
         """
         bodies = self.board_bodies(week)
-        # Only this first post is allowed to notify anyone. Every later edit,
-        # and any continuation message added afterwards, is sent with mentions
-        # suppressed - so opening a gameweek pings the server exactly once.
+        # TEMP: @everyone ping disabled. Re-enable by swapping this back:
+        # mention = config.ANNOUNCE_MENTION or None
+        mention = None
+        content = "||{}||".format(mention) if mention else None
         pinging = discord.AllowedMentions(everyone=True, roles=True, users=False)
-        quiet = discord.AllowedMentions.none()
-        sent = []
-        for index, body in enumerate(bodies):
-            sent.append(await channel.send(
-                body, allowed_mentions=pinging if index == 0 else quiet
-            ))
-        self.store.set_board(week, channel.id, [m.id for m in sent],
+        message = await channel.send(
+            content=content, embeds=[_discord_embed(b) for b in bodies],
+            allowed_mentions=pinging,
+        )
+        self.store.set_board(week, channel.id, [message.id],
                              notify.board_digest(bodies))
-        message = sent[0]
 
         if with_button:
             gw = next((g for g in season.ALL if g.week == week), None)
@@ -480,24 +486,18 @@ class PRSBot(discord.Client):
             channel = self.get_channel(record["channel_id"]) or \
                 await self.fetch_channel(record["channel_id"])
 
-            # Maintain every message the board occupies, not just the first.
-            # A full gameweek needs two once club badges and referee names
-            # lengthen the rows, and the count changes as fixtures get times -
-            # so edit what exists, add what is newly needed, drop the surplus.
-            # Mentions are suppressed throughout: the initial post in
+            # Mentions are suppressed on every edit: the initial post in
             # publish_board is the only thing allowed to ping.
             quiet = discord.AllowedMentions.none()
-            live = []
-            for index, body in enumerate(bodies):
-                if index < len(known):
-                    message = await channel.fetch_message(known[index])
-                    if message.content != body:
-                        await message.edit(content=body, allowed_mentions=quiet)
-                    live.append(message.id)
-                else:
-                    live.append((await channel.send(body, allowed_mentions=quiet)).id)
+            embeds = [_discord_embed(b) for b in bodies]
+            if known:
+                message = await channel.fetch_message(known[0])
+                await message.edit(embeds=embeds, allowed_mentions=quiet)
+                live = [message.id]
+            else:
+                live = [(await channel.send(embeds=embeds, allowed_mentions=quiet)).id]
 
-            for stale in known[len(bodies):]:
+            for stale in known[1:]:
                 try:
                     await (await channel.fetch_message(stale)).delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):

@@ -15,9 +15,10 @@ import random
 import sys
 import tempfile
 
+import bot.notify as notify_module
 from bot.db import Store
 from bot.notify import (
-    BOARD_CHUNK, board_digest, board_row, dashboard_summary, fixture_board,
+    board_digest, board_row, dashboard_summary, fixture_board,
     fixture_picker,
 )
 from bot.orchestrator import dashboard
@@ -26,6 +27,9 @@ from bot.slots import Slot, clean_day, slot_key
 
 FAILURES = []
 DISCORD_LIMIT = 2000
+# An embed description's own limit, separate from (and much bigger than) the
+# 2000-character cap on a plain message's content.
+EMBED_DESC_LIMIT = 4096
 
 
 def check(name, got, want):
@@ -118,22 +122,19 @@ print("\na realistic 40-fixture week fits Discord's limits")
 store = fresh_store()
 build_week(store, 40)
 bodies = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for)
-check("every body within Discord's 2000 chars",
-      all(len(b) <= DISCORD_LIMIT for b in bodies), True)
-check("longest body", max(len(b) for b in bodies) <= DISCORD_LIMIT, True)
-print("       (split into {} message(s), longest {} chars)".format(
-    len(bodies), max(len(b) for b in bodies)))
+check("every embed's description within its 4096-char limit",
+      all(len(b.description) <= EMBED_DESC_LIMIT for b in bodies), True)
+print("       (split into {} embed(s), longest description {} chars)".format(
+    len(bodies), max(len(b.description) for b in bodies)))
 check("all 40 fixtures present",
-      sum(b.count(" *vs* ") for b in bodies), 40)
-check("every continuation message still fits",
-      all(len(b) <= DISCORD_LIMIT for b in bodies[1:]), True)
+      sum(b.description.count(" *vs* ") for b in bodies), 40)
 
 print("\nan 80-fixture week still splits rather than truncating")
 store = fresh_store()
 build_week(store, 80)
 big = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for)
-check("within limits", all(len(b) <= DISCORD_LIMIT for b in big), True)
-check("nothing dropped", sum(b.count(" *vs* ") for b in big), 80)
+check("within limits", all(len(b.description) <= EMBED_DESC_LIMIT for b in big), True)
+check("nothing dropped", sum(b.description.count(" *vs* ") for b in big), 80)
 
 # --------------------------------------------------------------------------
 print("\ngrouped by division, titled, with the deadline")
@@ -143,17 +144,21 @@ from bot import season as _season
 store = fresh_store()
 build_week(store, 10)
 gw1 = _season.gameweek("GW1")
-grouped = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
-                                 gameweek=gw1, deadline=gw1.deadline))
+grouped_embeds = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
+                               gameweek=gw1, deadline=gw1.deadline)
+grouped = "\n".join(b.description for b in grouped_embeds)
 check("titled with the season and gameweek",
-      "**__PRS SEASON 17 GAMEWEEK 1:__**" in grouped, True)
+      "**PRS SEASON 17 GAMEWEEK 1**" in grouped, True)
 check("grouped by division", "**__Premier League:__**" in grouped, True)
 check("every division present",
       all("**__{}:__**".format(n) in grouped for n in _season.LEAGUES.values()), True)
 check("divisions in a fixed order",
       grouped.index("Premier League:") < grouped.index("Bundesliga:"), True)
-check("the deadline is stated", "SCHEDULING DEADLINE" in grouped, True)
-check("says it updates itself", "updates itself" in grouped, True)
+check("the deadline is a field on the last embed",
+      any(name == "Scheduling Deadline" for name, _, _ in grouped_embeds[-1].fields),
+      True)
+check("says it updates itself, in the footer",
+      "updates itself" in (grouped_embeds[-1].footer or ""), True)
 
 print("\nan undecided fixture shows a placeholder rather than being dropped")
 store = fresh_store()
@@ -161,20 +166,22 @@ build_week(store, 2)
 store.create_fixture("S17_Clubs", WEEK, "LATE FC", "SLOW FC", 5, 6,
                      "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY,
                      league="PL")
-mixed = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for))
+mixed = "\n".join(b.description for b in
+                  fixture_board(store.fixtures(week=WEEK), WEEK, slot_for))
 check("shows a TBD placeholder", "`TBD`" in mixed, True)
 check("and is still listed", "LATE FC" in mixed, True)
 
 print("\nan empty week says so instead of rendering a bare heading")
 check("empty week", "No fixtures for this gameweek yet" in
-      "\n".join(fixture_board([], WEEK, slot_for)), True)
+      "\n".join(b.description for b in fixture_board([], WEEK, slot_for)), True)
 
 print("\na fixture whose slot the sheet no longer offers is not silently dropped")
 store = fresh_store()
 fid = store.create_fixture("S17_Clubs", WEEK, "OLD FC", "GONE FC", 7, 8,
                            "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY)
 store.set_schedule(fid, "sat_1630", Source.MANAGER_PREFERENCES, Status.SCHEDULED)
-orphan = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for))
+orphan = "\n".join(b.description for b in
+                   fixture_board(store.fixtures(week=WEEK), WEEK, slot_for))
 check("still shown", "OLD FC" in orphan, True)
 
 # --------------------------------------------------------------------------
@@ -285,12 +292,13 @@ for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
                            Source.MANAGER_PREFERENCES, Status.SCHEDULED)
 real = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                      gameweek=gw1, deadline=gw1.deadline)
-check("every message within the limit", all(len(b) <= DISCORD_LIMIT for b in real), True)
-check("all 20 rendered", sum(b.count(" *vs* ") for b in real), 20)
+check("every embed within the limit",
+      all(len(b.description) <= EMBED_DESC_LIMIT for b in real), True)
+check("all 20 rendered", sum(b.description.count(" *vs* ") for b in real), 20)
 check("half still say TBD",
-      sum(b.count("`TBD`") for b in real), 10)
-print("       ({} message(s), longest {} chars)".format(
-    len(real), max(len(b) for b in real)))
+      sum(b.description.count("`TBD`") for b in real), 10)
+print("       ({} embed(s), longest description {} chars)".format(
+    len(real), max(len(b.description) for b in real)))
 
 # --------------------------------------------------------------------------
 print("\nclub badges, and what they cost in message length")
@@ -314,12 +322,13 @@ try:
     badged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
                            gameweek=gw1, deadline=gw1.deadline)
     check("still within the limit with all 40 badges",
-          all(len(b) <= DISCORD_LIMIT for b in badged), True)
+          all(len(b.description) <= EMBED_DESC_LIMIT for b in badged), True)
     check("nothing dropped when it splits",
-          sum(b.count(" *vs* ") for b in badged), 20)
-    check("badges actually rendered", "<:ARS:" in "\n".join(badged), True)
-    print("       ({} message(s), longest {} chars)".format(
-        len(badged), max(len(b) for b in badged)))
+          sum(b.description.count(" *vs* ") for b in badged), 20)
+    check("badges actually rendered",
+          "<:ARS:" in "\n".join(b.description for b in badged), True)
+    print("       ({} embed(s), longest description {} chars)".format(
+        len(badged), max(len(b.description) for b in badged)))
 finally:
     _season.TEAM_EMOJI = real_emoji
 
@@ -329,10 +338,11 @@ real_season = _season.SEASON_EMOJI
 _season.LEAGUE_EMOJI = {"PL": "<:PL:123>"}
 _season.SEASON_EMOJI = "<:PRS:456>"
 try:
-    decorated = "\n".join(fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
-                                        gameweek=gw1, deadline=gw1.deadline))
-    check("season emoji follows the heading, outside the underline",
-          "GAMEWEEK 1:__**  <:PRS:456>" in decorated, True)
+    decorated = "\n".join(b.description for b in
+                          fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
+                                       gameweek=gw1, deadline=gw1.deadline))
+    check("season emoji follows the heading",
+          "GAMEWEEK 1**  <:PRS:456>" in decorated, True)
     check("league emoji follows its division",
           "**__Premier League:__**  <:PL:123>" in decorated, True)
     check("a division without one has no trailing space",
@@ -341,7 +351,7 @@ finally:
     _season.LEAGUE_EMOJI = real_league
     _season.SEASON_EMOJI = real_season
 
-print("\nthe footer is never split away from its deadline")
+print("\nthe deadline fields and footer stay on the last embed, even split")
 footer_store = fresh_store()
 for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
     fid = footer_store.create_fixture("S17_Clubs", WEEK, _season.team_name(h),
@@ -350,48 +360,34 @@ for n, (h, a, lg) in enumerate(_season.FIXTURES["GW1"]):
                                       Status.WAITING_FOR_AVAILABILITY, league=lg)
     footer_store.set_schedule(fid, SLOTS[n % len(SLOTS)].key,
                               Source.MANAGER_PREFERENCES, Status.SCHEDULED)
-saved_badges = dict(_season.TEAM_EMOJI)
-_season.TEAM_EMOJI = {name: "<:{}:1547614892981354567>".format(code)
-                      for code, name in _season.TEAM_CODES.items()}
+saved_chunk = notify_module.DESCRIPTION_CHUNK
+notify_module.DESCRIPTION_CHUNK = 500   # force a split with just 20 fixtures
 try:
     split = fixture_board(footer_store.fixtures(week=WEEK), WEEK, slot_for,
-                          gameweek=gw1, deadline=gw1.deadline, mention="@everyone")
-    check("splits into more than one message", len(split) > 1, True)
-    tail = [b for b in split if "SCHEDULING DEADLINE" in b]
-    check("the deadline block lands in exactly one message", len(tail), 1)
-    check("its explanation is in the same message",
-          "Officials set the time" in tail[0], True)
-    check("and so is the timezone note", "your own timezone" in tail[0], True)
-    check("all still within the limit",
-          all(len(b) <= DISCORD_LIMIT for b in split), True)
+                          gameweek=gw1, deadline=gw1.deadline)
+    check("actually splits into more than one embed", len(split) > 1, True)
+    check("only the last embed carries the deadline fields",
+          all(e.fields == [] for e in split[:-1]), True)
+    check("the last embed has the deadline field",
+          any(name == "Scheduling Deadline" for name, _, _ in split[-1].fields), True)
+    check("only the last embed carries the footer",
+          all(e.footer is None for e in split[:-1]), True)
+    check("the last embed's footer explains the deadline",
+          "Officials set the time" in split[-1].footer, True)
+    check("and mentions the timezone",
+          "your own timezone" in split[-1].footer, True)
 finally:
-    _season.TEAM_EMOJI = saved_badges
+    notify_module.DESCRIPTION_CHUNK = saved_chunk
 
-print("\nthe ping and the TBD placeholder")
+print("\nthe TBD placeholder")
 tbd_store = fresh_store()
 tbd_store.create_fixture("S17_Clubs", WEEK, "WAITING FC", "PENDING FC", 61, 62,
                          "2026-09-11T18:00:00Z", Status.WAITING_FOR_AVAILABILITY,
                          league="PL")
-tbd = "\n".join(fixture_board(tbd_store.fixtures(week=WEEK), WEEK, slot_for))
+tbd = "\n".join(b.description for b in
+                fixture_board(tbd_store.fixtures(week=WEEK), WEEK, slot_for))
 check("undecided fixtures read TBD", "`TBD`" in tbd, True)
 check("the old long-dash placeholder is gone", "to be decided" in tbd, False)
-
-pinged = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
-                       gameweek=gw1, deadline=gw1.deadline, mention="@everyone")
-check("the ping is spoilered on the first line",
-      pinged[0].splitlines()[0], "||@everyone||")
-check("a blank line separates it from the heading",
-      pinged[0].splitlines()[1], "")
-check("then the heading",
-      pinged[0].splitlines()[2].startswith("**__PRS"), True)
-check("only the first message carries it",
-      all(not b.startswith("||") for b in pinged[1:]), True)
-quiet = fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
-                      gameweek=gw1, deadline=gw1.deadline, mention=None)
-check("no ping when unset", quiet[0].startswith("**__"), True)
-check("a role mention works too",
-      fixture_board(store.fixtures(week=WEEK), WEEK, slot_for,
-                    mention="<@&123>")[0].splitlines()[0], "||<@&123>||")
 
 check("a team without a badge falls back to its name",
       _season.label_for("NO SUCH TEAM"), "NO SUCH TEAM")

@@ -11,6 +11,7 @@ the original matcher was to stop people converting GMT in their heads.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from . import season
@@ -21,11 +22,20 @@ from .weeks import discord_time, format_uk, from_iso, slot_datetime, week_saturd
 
 FOOTER = "-# Times show in your own timezone."
 
-# Discord trims genuinely-empty leading/trailing lines from a message before
-# displaying it, so a plain "" cannot be used to force blank space at the
-# very start or end of one. This renders as nothing but is not whitespace,
-# so there is nothing for Discord to trim away.
-BLANK_LINE = "⠀"
+
+@dataclass
+class BoardEmbed:
+    """Plain data for one Discord embed - no discord.Embed here, so this can
+    still be built and checked without a gateway, same as everything else in
+    this module. The caller (main.py) turns it into a real embed only when it
+    actually sends something.
+
+    `fields` is a list of (name, value, inline) triples.
+    """
+    description: str
+    title: str = None
+    fields: list = field(default_factory=list)
+    footer: str = None
 
 
 def _slot_line(week, slot):
@@ -151,13 +161,22 @@ def referee_board_row(fixture, slot, week, roster=()):
 
 
 def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
-                  competition=None, mention=None):
-    """The public, self-updating referee board: every fixture with a kickoff
-    time, grouped by calendar day and sorted chronologically within it.
+                  competition=None):
+    """The public, self-updating referee board: one embed per day that has a
+    kickoff time yet, all attached to a single message.
+
+    Each embed being its own visually-bordered card is what separates one day
+    from the next - unlike plain messages, Discord doesn't tightly group
+    embeds together with no gap, so there's no need for the leading-blank-line
+    trick a chunked-text version of this needed.
 
     A fixture still marked TBD is left off entirely - there's nothing to claim
     until it has a time. The claim menu itself is a separate message below
     this one; this board only ever shows state, never a call to action.
+
+    Mentioning the referee role, if configured, is the caller's job, not
+    this function's - a mention inside an embed is just inert text, it does
+    not notify anyone, so it has to go in the message's plain content instead.
     """
     rosters = rosters or {}
 
@@ -175,45 +194,35 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
     if competition:
         parts.append(competition.upper())
     parts.append((gameweek.label if gameweek else "FIXTURES").upper())
-    header = "**__{}:__**".format(" ".join(parts))
+    header = "**{}**".format(" ".join(parts))
     if season.usable_emoji(season.SEASON_EMOJI):
         header = "{}  {}".format(header, season.SEASON_EMOJI)
-    top = (["||{}||".format(mention), ""] if mention else []) + [header, ""]
 
-    footer = ["-# Times show in your own timezone. This board updates itself "
-             "as games are claimed."]
+    footer_text = ("Times show in your own timezone. This board updates "
+                  "itself as games are claimed.")
 
     if not by_day:
-        return _chunk(top + ["_No fixtures have a kickoff time yet._"], footer=footer)
+        return [BoardEmbed(
+            description=header + "\n\n_No fixtures have a kickoff time yet._",
+            footer=footer_text,
+        )]
 
-    # One message per day rather than a character-count split - Friday,
-    # Saturday, Sunday each land on their own message (only the days that
-    # actually have a kickoff yet), so which message is which day is obvious
-    # at a glance instead of depending on wherever a length limit happened to
-    # land. _chunk still runs within a day as a safety net, in case a single
-    # day alone somehow has enough fixtures to need more than one message.
-    #
-    # A leading blank line on each day's message (after the first) is what
-    # separates it from the one before - Discord groups consecutive messages
-    # from the same bot tightly together with no gap of its own, so the
-    # message's own content has to provide it. A truly empty line does not
-    # work for this: Discord trims leading/trailing blank lines from a
-    # message before displaying it, so a line that is actually empty gets
-    # silently stripped. BLANK_LINE is invisible but not whitespace-only, so
-    # there is nothing for Discord to trim.
     days = sorted(by_day)
-    messages = []
+    embeds = []
     for index, day in enumerate(days):
-        lines = list(top) if index == 0 else [BLANK_LINE]
-        lines.append("**__{} {} {}:__**  📅".format(
-            day.strftime("%A"), day.day, day.strftime("%B")
+        rows = [
+            referee_board_row(fixture, slot, week, rosters.get(fixture["id"]))
+            for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0])
+        ]
+        description = "\n".join(rows)
+        if index == 0:
+            description = header + "\n\n" + description
+        embeds.append(BoardEmbed(
+            title="{} {} {}".format(day.strftime("%A"), day.day, day.strftime("%B")),
+            description=description,
         ))
-        for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0]):
-            lines.append(referee_board_row(fixture, slot, week, rosters.get(fixture["id"])))
-        lines.append("")
-        is_last_day = index == len(days) - 1
-        messages += _chunk(lines, footer=footer if is_last_day else ())
-    return messages
+    embeds[-1].footer = footer_text
+    return embeds
 
 
 def referee_claim_prompt(open_count):
@@ -248,15 +257,6 @@ def no_valid_time(fixture, reason):
 # --------------------------------------------------------------------------
 # the master fixture list (spec step 15)
 # --------------------------------------------------------------------------
-
-# Discord rejects a message over 2000 characters outright, so the board is
-# split across messages when it needs to be. The margin below that is kept
-# small on purpose: a real row is at most a few hundred characters, so there
-# is no realistic way for one to push a message over 2000 even this close to
-# it - and a tighter budget means an ordinary week's worth of fixtures fits
-# in a single message (footer included) instead of spilling one line into a
-# message of its own.
-BOARD_CHUNK = 1950
 
 STATUS_ICON = {
     "FULLY_CONFIRMED": "✅",
@@ -293,33 +293,36 @@ def board_row(fixture, slot):
 
 
 def fixture_board(fixtures, week, slot_for,
-                  gameweek=None, deadline=None, mention=None, competition=None):
-    """The public fixture announcement, grouped by division.
+                  gameweek=None, deadline=None, competition=None):
+    """The public fixture announcement, grouped by division, as one or more
+    embeds (more than one only if a huge gameweek genuinely needs it - see
+    _chunk_description). All attached to a single message.
 
     Every fixture appears, scheduled or not. It is edited in place as times get
     decided, so one message is the whole gameweek's answer - which matters more
     than it sounds: managers with DMs closed never see a DM, and this is what
     they read instead.
+
+    Mentioning the announce role, if configured, is the caller's job, not this
+    function's - a mention inside an embed is just inert text, it does not
+    notify anyone, so it has to go in the message's plain content instead.
     """
     by_league = {}
     for fixture in fixtures:
         key = fixture.get("league") or "??"
         by_league.setdefault(key, []).append(fixture)
 
-    # "PRS SEASON 17 CLUBS GAMEWEEK 1:" - the competition sits between the
+    # "PRS SEASON 17 CLUBS GAMEWEEK 1" - the competition sits between the
     # season and the gameweek, matching how the league titles its own posts.
     parts = ["PRS", season.SEASON_LABEL]
     if competition:
         parts.append(competition.upper())
     parts.append((gameweek.label if gameweek else "FIXTURES").upper())
-    header = "**__{}:__**".format(" ".join(parts))
+    header = "**{}**".format(" ".join(parts))
     if season.usable_emoji(season.SEASON_EMOJI):
         header = "{}  {}".format(header, season.SEASON_EMOJI)
 
-    # The ping sits above the heading in a spoiler: it still notifies, but
-    # collapses to a grey block instead of shouting at the top of the post.
-    # A blank line after it keeps the heading clear of the spoiler block.
-    lines = (["||{}||".format(mention), ""] if mention else []) + [header, ""]
+    lines = [header, ""]
 
     order = list(season.LEAGUES) + sorted(k for k in by_league if k not in season.LEAGUES)
     for key in order:
@@ -353,22 +356,20 @@ def fixture_board(fixtures, week, slot_for,
         lines.append("_No fixtures for this gameweek yet._")
         lines.append("")
 
-    footer = []
+    embeds = [BoardEmbed(description=d) for d in _chunk_description(lines)]
+
     if deadline is not None:
-        footer += [
-            "**SCHEDULING DEADLINE:**",
-            format_uk(deadline),
-            "**SCHEDULING EXTENSION:**",
-            format_uk(deadline + timedelta(days=7)),
+        embeds[-1].fields = [
+            ("Scheduling Deadline", format_uk(deadline), True),
+            ("Scheduling Extension", format_uk(deadline + timedelta(days=7)), True),
         ]
-    footer.append(
-        "-# Not agreed by then and Officials set the time from your submitted "
+    embeds[-1].footer = (
+        "Not agreed by then and Officials set the time from your submitted "
         "timings. The absolute latest a fixture can be scheduled to, if "
         "postponed. Times show in your own timezone. This post updates "
         "itself as fixtures are agreed."
     )
-
-    return _chunk(lines, footer=footer)
+    return embeds
 
 
 def availability_call_to_action(gameweek, deadline):
@@ -401,44 +402,48 @@ def availability_call_to_action(gameweek, deadline):
     ])
 
 
-def _chunk(lines, footer=()):
-    """Split rendered lines into message-sized pieces, never mid-row.
+# Embed descriptions allow up to 4096 characters each - far more headroom
+# than a plain message ever had, so in practice a gameweek's fixture list
+# always fits in one embed. The budget stays comfortably under that ceiling
+# so a freak division (badges failing to resolve and falling back to full
+# team names, say) still has somewhere to spill into instead of erroring.
+DESCRIPTION_CHUNK = 3800
 
-    Discord rejects a message over 2000 characters outright, and a full
-    gameweek of twenty fixtures across five divisions clears that once club
-    badges are in - a badge is ~28 characters and there are two per row.
 
-    `footer` is kept whole and attached to the last message, or given one of
-    its own if it will not fit. Chunking it with everything else split the
-    deadline away from the line explaining it, which read like a mistake.
-    """
-    messages = []
+def _chunk_description(lines):
+    """Split rendered lines into embed-description-sized pieces, never mid-row."""
+    chunks = []
     current = []
     length = 0
     for line in lines:
-        if length + len(line) + 1 > BOARD_CHUNK and current:
-            messages.append(current)
+        if length + len(line) + 1 > DESCRIPTION_CHUNK and current:
+            chunks.append("\n".join(current))
             current = []
             length = 0
         current.append(line)
         length += len(line) + 1
     if current:
-        messages.append(current)
-
-    footer = list(footer)
-    if footer:
-        tail = sum(len(line) + 1 for line in footer)
-        if messages and length + tail <= BOARD_CHUNK:
-            messages[-1] += footer
-        else:
-            messages.append(list(footer))
-
-    return ["\n".join(block) for block in messages] or [""]
+        chunks.append("\n".join(current))
+    return chunks or [""]
 
 
 def board_digest(bodies):
-    """A fingerprint of what was published, to skip no-op edits."""
-    return hashlib.sha256("\n".join(bodies).encode("utf-8")).hexdigest()[:16]
+    """A fingerprint of what was published, to skip no-op edits.
+
+    `bodies` is a mix of plain strings and BoardEmbed objects - whichever a
+    given board's caller happens to pass - so each embed is flattened to its
+    own text before hashing rather than assuming one shape or the other.
+    """
+    parts = []
+    for body in bodies:
+        if isinstance(body, BoardEmbed):
+            parts.append(body.title or "")
+            parts.append(body.description)
+            parts.append(body.footer or "")
+            parts += ["{}:{}".format(name, value) for name, value, _ in body.fields]
+        else:
+            parts.append(body)
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
 # Leaves headroom under Discord's 2000-character cap for the sentence a

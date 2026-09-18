@@ -49,6 +49,19 @@ def rule(title):
     say("=" * 72)
 
 
+def say_embed(embed, prefix="    "):
+    """Print a notify.BoardEmbed the way Discord would show the real thing:
+    title, description, fields, then footer."""
+    if embed.title:
+        say(prefix + "[ {} ]".format(embed.title))
+    for line in embed.description.splitlines():
+        say(prefix + line)
+    for name, value, _ in embed.fields:
+        say(prefix + "{}: {}".format(name, value))
+    if embed.footer:
+        say(prefix + "-# " + embed.footer)
+
+
 def expect(label, got, want):
     ok = got == want
     say("    {} {}".format("PASS" if ok else "FAIL", label))
@@ -168,9 +181,8 @@ def show_ref_board():
     bodies = notify.referee_board(store.fixtures(week=gw.week), gw.week, slot_of,
                                   rosters=rosters, gameweek=gw)
     for body in bodies:
-        for line in body.splitlines():
-            say("    │ " + line)
-    say("    │ ")
+        say_embed(body, prefix="    │ ")
+        say("    │ ")
     for line in notify.referee_claim_prompt(open_referee_count()).splitlines():
         say("    │ " + line)
     say("    └" + "─" * 60)
@@ -298,8 +310,7 @@ expect("but every fixture still has at least one assistant slot open",
 rule("THE FIXTURE BOARD  ·  /fixture board")
 for body in notify.fixture_board(store.fixtures(week=gw.week), gw.week, slot_of):
     say("")
-    for line in body.splitlines():
-        say("    " + line)
+    say_embed(body)
 
 rule("THE STAFF DASHBOARD  ·  /fixture list")
 buckets = dashboard(store, week=gw.week)
