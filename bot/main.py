@@ -1363,7 +1363,7 @@ def register(bot):
         "- `g3` three goals",
         "",
         "**Lineups:** pre-filled. Reorder to match who started, keep substitutes "
-        "under `BENCH`, and remove anyone who did not play.",
+        "under `BENCH` and remove anyone who did not play.",
         "",
         "**MOTM:** best first (🏆 🥇 🥈 🥉). Optional note after a dash.",
     ])
