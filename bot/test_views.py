@@ -209,15 +209,15 @@ check("still open with two fixtures to answer for",
 check("both list the shared manager",
       WEEK_TARGET.may_answer(multi_store, 111), True)
 check("heading lists both of their fixtures",
-      ("#1024" in WEEK_TARGET.heading(multi_store, 111)
-       and "#1025" in WEEK_TARGET.heading(multi_store, 111)), True)
-check("each fixture on its own line, not comma-packed",
+      ("ABC FC vs XYZ FC" in WEEK_TARGET.heading(multi_store, 111)
+       and "DEF FC vs GHI FC" in WEEK_TARGET.heading(multi_store, 111)), True)
+check("each fixture on its own line, not comma-packed, no fixture numbers",
       WEEK_TARGET.heading(multi_store, 111),
-      "Your fixtures:\n#1024 ABC FC vs XYZ FC\n#1025 DEF FC vs GHI FC")
-check("a single-fixture manager gets the plain #id vs heading",
-      WEEK_TARGET.heading(multi_store, 222), "#1024 ABC FC vs XYZ FC")
+      "**Your fixtures:**\nABC FC vs XYZ FC\nDEF FC vs GHI FC")
+check("a single-fixture manager gets the plain vs heading, no bold header",
+      WEEK_TARGET.heading(multi_store, 222), "ABC FC vs XYZ FC")
 check("only their fixtures are listed, not the other manager's",
-      "#1025" in WEEK_TARGET.heading(multi_store, 222), False)
+      "DEF FC" in WEEK_TARGET.heading(multi_store, 222), False)
 
 # --------------------------------------------------------------------------
 print("\na fresh week carries forward the manager's last submitted picks")

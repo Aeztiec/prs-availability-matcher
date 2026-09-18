@@ -90,15 +90,15 @@ class Target:
 
     def heading(self, store, user_id):
         def row(f):
-            return "#{} {} vs {}".format(
-                f["id"], season.label_for(f["home_team"]), season.label_for(f["away_team"]))
+            return "{} vs {}".format(
+                season.label_for(f["home_team"]), season.label_for(f["away_team"]))
 
         fixtures = self._my_fixtures(store, user_id)
         if not fixtures:
             return "No fixtures"
         if len(fixtures) == 1:
             return row(fixtures[0])
-        return "Your fixtures:\n" + "\n".join(row(f) for f in fixtures)
+        return "**Your fixtures:**\n" + "\n".join(row(f) for f in fixtures)
 
     def closed(self, store, user_id):
         """Why answering is no longer possible, or None."""
