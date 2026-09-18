@@ -183,8 +183,7 @@ def show_ref_board():
     for body in bodies:
         say_embed(body, prefix="    │ ")
         say("    │ ")
-    for line in notify.referee_claim_prompt(open_referee_count()).splitlines():
-        say("    │ " + line)
+    say_embed(notify.referee_claim_prompt(open_referee_count()), prefix="    │ ")
     say("    └" + "─" * 60)
 
 

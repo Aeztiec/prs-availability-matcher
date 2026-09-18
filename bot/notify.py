@@ -162,17 +162,14 @@ def referee_board_row(fixture, slot, week, roster=()):
 
 def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
                   competition=None):
-    """The public, self-updating referee board: one embed per day that has a
-    kickoff time yet, all attached to a single message.
-
-    Each embed being its own visually-bordered card is what separates one day
-    from the next - unlike plain messages, Discord doesn't tightly group
-    embeds together with no gap, so there's no need for the leading-blank-line
-    trick a chunked-text version of this needed.
+    """The public, self-updating referee board: every day that has a kickoff
+    time yet, grouped under its own bold heading inside one embed (more than
+    one only if a huge gameweek genuinely needs it - see _chunk_description).
 
     A fixture still marked TBD is left off entirely - there's nothing to claim
-    until it has a time. The claim menu itself is a separate message below
-    this one; this board only ever shows state, never a call to action.
+    until it has a time. The claim prompt is a separate embed below this one
+    (see referee_claim_prompt); this board only ever shows state, never a
+    call to action.
 
     Mentioning the referee role, if configured, is the caller's job, not
     this function's - a mention inside an embed is just inert text, it does
@@ -207,40 +204,35 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
             footer=footer_text,
         )]
 
-    days = sorted(by_day)
-    embeds = []
-    for index, day in enumerate(days):
-        rows = [
-            referee_board_row(fixture, slot, week, rosters.get(fixture["id"]))
-            for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0])
-        ]
-        description = "\n".join(rows)
-        if index == 0:
-            description = header + "\n\n" + description
-        embeds.append(BoardEmbed(
-            title="{} {} {}".format(day.strftime("%A"), day.day, day.strftime("%B")),
-            description=description,
-        ))
+    lines = [header, ""]
+    for day in sorted(by_day):
+        lines.append("**{} {} {}**".format(
+            day.strftime("%A"), day.day, day.strftime("%B")))
+        for moment, fixture, slot in sorted(by_day[day], key=lambda row: row[0]):
+            lines.append(referee_board_row(
+                fixture, slot, week, rosters.get(fixture["id"])))
+        lines.append("")
+
+    embeds = [BoardEmbed(description=d) for d in _chunk_description(lines)]
     embeds[-1].footer = footer_text
     return embeds
 
 
 def referee_claim_prompt(open_count):
-    """The message under the board that carries the claim menu."""
+    """The embed under the board that carries the claim menu."""
     if open_count == 0:
-        return "\n".join([
-            "**__Referees:__**",
-            "",
-            "Every game above is fully staffed. ✅",
-        ])
-    return "\n".join([
-        "**__Referees, claim a game:__**",
-        "",
-        "Pick an open game from the menu below to take it. First come, first "
-        "served - one referee and up to two assistants per game.",
-        "",
-        "-# {} game(s) still need officiating.".format(open_count),
-    ])
+        return BoardEmbed(
+            title="Referees",
+            description="Every game above is fully staffed. ✅",
+        )
+    return BoardEmbed(
+        title="Referees, claim a game",
+        description=(
+            "Pick an open game from the menu below to take it. First come, "
+            "first served - one referee and up to two assistants per game."
+        ),
+        footer="{} game(s) still need officiating.".format(open_count),
+    )
 
 
 def no_valid_time(fixture, reason):

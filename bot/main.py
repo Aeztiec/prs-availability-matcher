@@ -271,7 +271,7 @@ class PRSBot(discord.Client):
         return view
 
     def ref_board_payload(self, week):
-        """The board embeds, the claim-prompt text, its view, and a digest
+        """The board embeds, the claim-prompt embed, its view, and a digest
         of all of it together - so publish and refresh always agree on
         whether anything actually changed."""
         fixtures = self.store.fixtures(week=week)
@@ -288,8 +288,7 @@ class PRSBot(discord.Client):
         return bodies, prompt, view, digest
 
     async def publish_ref_board(self, week, channel):
-        """Post the referee board (one message, one embed per day), and the
-        claim menu under it."""
+        """Post the referee board, and the claim menu embed under it."""
         bodies, prompt, view, digest = self.ref_board_payload(week)
         # Spoilered so it still notifies the role without shouting at the top
         # of the post - same idea the old text board used.
@@ -302,7 +301,9 @@ class PRSBot(discord.Client):
             content=content, embeds=[_discord_embed(b) for b in bodies],
             allowed_mentions=pinging,
         )]
-        sent.append(await channel.send(prompt, view=view, allowed_mentions=quiet))
+        sent.append(await channel.send(
+            embed=_discord_embed(prompt), view=view, allowed_mentions=quiet
+        ))
         self.store.set_ref_board(week, channel.id, [m.id for m in sent], digest)
         return sent[0]
 
@@ -335,12 +336,15 @@ class PRSBot(discord.Client):
             else:
                 live.append((await channel.send(embeds=embeds, allowed_mentions=quiet)).id)
 
+            prompt_embed = _discord_embed(prompt)
             if known_prompt:
                 prompt_message = await channel.fetch_message(known_prompt)
-                await prompt_message.edit(content=prompt, view=view)
+                await prompt_message.edit(embed=prompt_embed, view=view)
                 live.append(prompt_message.id)
             else:
-                live.append((await channel.send(prompt, view=view, allowed_mentions=quiet)).id)
+                live.append((await channel.send(
+                    embed=prompt_embed, view=view, allowed_mentions=quiet
+                )).id)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
             log.warning("referee board for %s unreachable (%s); forgetting it", week, error)
             self.store.forget_ref_board(week)
