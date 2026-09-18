@@ -94,6 +94,12 @@ def _roster_line(roster):
 # down to fit it - DOME next to UEFA, DOM next to UCL/UEL.
 MIN_TAG_WIDTH = 3
 
+# How a kickoff reads on a board row. "f" is "18 September 2026 17:30"; the
+# weekday is left off because each row sits under a "Friday 18 September"
+# heading, and the shorter time keeps a row with two referees on one line
+# instead of wrapping the second name onto its own.
+ROW_TIME_STYLE = "f"
+
 
 def tag_width(leagues):
     """How many letters every tag on a board gets: the longest competition
@@ -120,7 +126,7 @@ def referee_board_row(fixture, slot, week, roster=(), tag_letters=MIN_TAG_WIDTH)
     """
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
-    when = discord_time(slot_datetime(week, slot), "F")
+    when = discord_time(slot_datetime(week, slot), ROW_TIME_STYLE)
     tag = league_tag(fixture.get("league"), tag_letters)
     who = " ".join("<@{}>".format(r["referee_id"]) for r in roster) if roster else "_open_"
     return "{}{} *vs* {} @ {} {}".format(tag, home, away, when, who)
@@ -228,7 +234,7 @@ def board_row(fixture, slot):
     """
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
-    when = (discord_time(slot_datetime(fixture["week"], slot), "F")
+    when = (discord_time(slot_datetime(fixture["week"], slot), ROW_TIME_STYLE)
             if slot else "`TBD`")
     return "{} *vs* {} @ {}".format(home, away, when)
 
