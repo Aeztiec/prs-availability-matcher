@@ -161,9 +161,7 @@ def referee_board_row(fixture, slot, week, roster=()):
 def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
                   competition=None):
     """The public, self-updating referee board: every day that has a kickoff
-    time yet, grouped under its own bold heading. Whole days are packed into
-    embeds of at most REFEREE_EMBED_CHUNK characters (see _pack_blocks), all
-    sent in one message.
+    time yet, one embed per day, all sent in one message.
 
     A fixture still marked TBD is left off entirely - there's nothing to claim
     until it has a time. The claim prompt is a separate embed below this one
@@ -215,7 +213,9 @@ def referee_board(fixtures, week, slot_for, rosters=None, gameweek=None,
         block.append("")
         blocks.append(block)
 
-    chunks = _pack_blocks(blocks, REFEREE_EMBED_CHUNK)
+    chunks = []
+    for block in blocks:
+        chunks.extend(_chunk_description(block, REFEREE_EMBED_CHUNK))
     embeds = [BoardEmbed(title=title if i == 0 else None, description=d)
              for i, d in enumerate(chunks)]
     embeds[-1].footer = footer_text
@@ -444,32 +444,9 @@ def _chunk_description(lines, limit=None):
 # description up to 4096 characters, but the client was observed silently
 # not displaying the tail of a ~4000-character one (the board's Sunday
 # section went missing on screen while the API held it in full) - so the
-# referee board packs whole days into embeds well under that instead of
-# trusting the hard cap. Days stay together; only a single day bigger than
-# this is ever split.
+# referee board gets one embed per day instead of one long one. A day is
+# only ever split further if it alone is bigger than this.
 REFEREE_EMBED_CHUNK = 2500
-
-
-def _pack_blocks(blocks, limit):
-    """Pack lists of lines (one per day) into embed descriptions of at most
-    `limit` characters, never splitting a block unless it alone is too big."""
-    packed = []
-    current = []
-    length = 0
-    for block in blocks:
-        size = sum(len(line) + 1 for line in block)
-        if current and length + size > limit:
-            packed.append(current)
-            current = []
-            length = 0
-        current = current + block
-        length += size
-    if current:
-        packed.append(current)
-    out = []
-    for lines in packed:
-        out.extend(_chunk_description(lines, limit))
-    return out or [""]
 
 
 # Discord's cap on the *combined* size of every embed attached to one
