@@ -94,11 +94,15 @@ def _roster_line(roster):
 # down to fit it - DOME next to UEFA, DOM next to UCL/UEL.
 MIN_TAG_WIDTH = 3
 
-# How a kickoff reads on a board row. "f" is "18 September 2026 17:30"; the
+# How a kickoff reads on the referee board and game details. "f" is "18 September 2026 17:30"; the
 # weekday is left off because each row sits under a "Friday 18 September"
 # heading, and the shorter time keeps a row with two referees on one line
 # instead of wrapping the second name onto its own.
 ROW_TIME_STYLE = "f"
+
+# The public fixture board has room for the full "Friday, 18 September 2026
+# 17:30", since its rows carry no referee names.
+BOARD_TIME_STYLE = "F"
 
 
 def tag_width(leagues):
@@ -234,7 +238,7 @@ def board_row(fixture, slot):
     """
     home = season.label_for(fixture["home_team"])
     away = season.label_for(fixture["away_team"])
-    when = (discord_time(slot_datetime(fixture["week"], slot), ROW_TIME_STYLE)
+    when = (discord_time(slot_datetime(fixture["week"], slot), BOARD_TIME_STYLE)
             if slot else "`TBD`")
     return "{} *vs* {} @ {}".format(home, away, when)
 
