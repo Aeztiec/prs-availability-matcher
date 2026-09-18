@@ -350,13 +350,27 @@ def availability_call_to_action(gameweek, deadline):
     )
 
 
+# Discord sizes an embed to its widest line, so a short one comes out narrow.
+# Invisible characters (braille blank, which Discord does not trim as
+# whitespace) on the end of the last line stretch every embed to the full
+# width. If embeds still look short, raise EMBED_PAD; if the blanks wrap onto
+# a line of their own on your screen, lower it.
+EMBED_PAD = 46
+BLANK = "⠀"
+
+
+def widen(description):
+    """The description with invisible padding on its last line."""
+    return (description or "") + BLANK * EMBED_PAD
+
+
 # Discord's own hard cap on one embed's description. Set to the real
 # number rather than a conservative margin below it: _chunk_description()
 # always finishes a chunk at least one character short of this figure
 # (see its docstring), so a chunk can never actually reach 4096 - there is
 # no scenario where sitting further below it buys any extra safety, only
 # an earlier, needless split into a second embed.
-DESCRIPTION_CHUNK = 4096
+DESCRIPTION_CHUNK = 4096 - EMBED_PAD   # leaves room for widen()'s padding
 
 
 def _chunk_description(lines, limit=None):
@@ -406,7 +420,8 @@ MESSAGE_EMBED_BUDGET = 5900
 def _embed_size(embed):
     """Every character Discord counts toward an embed's share of the
     combined per-message limit."""
-    size = len(embed.description) + len(embed.title or "") + len(embed.footer or "")
+    size = (len(embed.description) + EMBED_PAD + len(embed.title or "")
+            + len(embed.footer or ""))
     for name, value, _ in embed.fields:
         size += len(name) + len(value)
     return size
