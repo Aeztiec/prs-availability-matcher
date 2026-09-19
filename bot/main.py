@@ -15,11 +15,17 @@ without a gateway.
 from __future__ import annotations
 
 import logging
+import os
 import sys
+import tempfile
 
 from bot import config
 from bot.client import PRSBot
 from bot.commands import register
+from bot.db import Store
+from bot.domain import season
+from bot.domain.players import Players
+from bot.paths import DB_PATH, PLAYERS_CSV
 
 
 def main(argv=None):
@@ -31,17 +37,23 @@ def main(argv=None):
     if "--check" in argv:
         # Everything except connecting: catches config gaps, a bad sheet and
         # an over-budget selector without touching Discord.
-        bot = PRSBot()
-        bot.load_timings()
-        register(bot)
-        print("timings   : {} ({} slots)".format(bot.timings.title, len(bot.slots)))
-        print("database  : {}".format(bot.store.path))
-        print("commands  : {}".format(
-            ", ".join(sorted(c.name for c in bot.tree.get_commands()))
-        ))
-        gaps = config.missing()
-        print("config    : {}".format("ok" if not gaps else "MISSING " + ", ".join(gaps)))
-        return 1 if gaps else 0
+        with tempfile.TemporaryDirectory() as scratch:
+            bot = PRSBot(store=Store(os.path.join(scratch, "check.db")))
+            bot.load_timings()
+            register(bot)
+            problems = season.validate([t.country for t in bot.timings.sheet.teams])
+            players = Players.load()
+            print("timings   : {} ({} slots)".format(bot.timings.title, len(bot.slots)))
+            print("players   : {}".format(
+                "{} on the sheet".format(len(players.rows)) if players.rows
+                else "MISSING - {} (needed for /result)".format(PLAYERS_CSV)))
+            print("database  : {}".format(DB_PATH))
+            print("commands  : {}".format(
+                ", ".join(sorted(c.name for c in bot.tree.get_commands()))))
+            print("season    : {}".format("ok" if not problems else "; ".join(problems)))
+            gaps = config.missing()
+            print("config    : {}".format("ok" if not gaps else "MISSING " + ", ".join(gaps)))
+        return 1 if gaps or problems else 0
 
     gaps = config.missing()
     if gaps:

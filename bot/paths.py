@@ -17,7 +17,5 @@ DATA_DIR = os.path.join(ROOT, "data")
 TIMINGS_DIR = os.path.join(DATA_DIR, "timings")
 PLAYERS_CSV = os.path.join(DATA_DIR, "players.csv")
 DB_PATH = os.path.join(DATA_DIR, "fixtures.db")
-ASSETS_DIR = os.path.join(ROOT, "assets")
-
 # Before the reorganisation the database sat inside the package.
 LEGACY_DB_PATH = os.path.join(ROOT, "bot", "fixtures.db")

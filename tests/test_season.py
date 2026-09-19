@@ -12,7 +12,6 @@ Run with:  python -m tests.test_season
 from __future__ import annotations
 
 import os
-import random
 import sys
 import tempfile
 from collections import Counter
@@ -121,11 +120,11 @@ check("every pairing at most once", max(pairings.values()), 1)
 # --------------------------------------------------------------------------
 print("\nthe UEFA League Phase, alongside the domestic fixtures")
 # --------------------------------------------------------------------------
-uefa_weeks = [gw for gw in season.ALL if gw.has_uefa_fixtures]
+uefa_weeks = [gw for gw in season.ALL if gw.uefa_fixtures]
 check("GW1 through GW5 have a UEFA round", [g.key for g in uefa_weeks],
       ["GW1", "GW2", "GW3", "GW4", "GW5"])
 check("GW6 and GW7 have none",
-      [season.gameweek(k).has_uefa_fixtures for k in ("GW6", "GW7")], [False, False])
+      [bool(season.gameweek(k).uefa_fixtures) for k in ("GW6", "GW7")], [False, False])
 
 for gw in uefa_weeks:
     codes = [c for row in gw.uefa_fixtures for c in row[:2]]
@@ -176,14 +175,6 @@ print("\nwhat's open, and when")
 before_season = utc(2026, 9, 10, 12)
 check("before the season starts, GW1 is current",
       season.current(before_season).key, "GW1")
-check("only GW1 open by default",
-      [g.key for g in season.upcoming(before_season)], ["GW1"])
-check("staff unlock reaches two ahead",
-      [g.key for g in season.upcoming(before_season, advance=2)],
-      ["GW1", "GW2", "GW3"])
-check("advance is capped at two",
-      [g.key for g in season.upcoming(before_season, advance=9)],
-      ["GW1", "GW2", "GW3"])
 
 print("\na gameweek stays current until its Sunday is over")
 check("Saturday of GW1", season.current(utc(2026, 9, 19, 20)).key, "GW1")

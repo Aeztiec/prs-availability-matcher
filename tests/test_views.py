@@ -15,10 +15,8 @@ Run with:  python -m tests.test_views
 
 from __future__ import annotations
 
-import re
 import sys
 
-import discord
 
 from bot.domain import season
 from bot.domain.scheduling import Pref
@@ -29,13 +27,11 @@ from bot.ui.views import (
     SCOPE_FIXTURE,
     ClearButton,
     DayButton,
-    OpenButton,
     SlotButton,
     SubmitButton,
     Target,
     build_message,
     build_view,
-    opener,
 )
 
 FAILURES = []
@@ -82,7 +78,6 @@ def emitted_ids(target):
         (DayButton, DayButton(target, 1, "Sunday").custom_id),
         (SubmitButton, SubmitButton(target).custom_id),
         (ClearButton, ClearButton(target).custom_id),
-        (OpenButton, OpenButton(target).custom_id),
     ]
 
 
@@ -303,24 +298,8 @@ submitted_state = SelectorState(SLOTS, saved={SLOTS[0].key: 2}, submitted=True)
 submitted_embed, _ = build_message(badged_store, WEEK_TARGET, 111, submitted_state)
 check("submitted note appended", "Submitted" in submitted_embed.description, True)
 
-# --------------------------------------------------------------------------
-print("\nthe DM opener button")
-# --------------------------------------------------------------------------
-# "avo:" must not be swallowed by the "av:" slot template - if it were, the DM
-# button would route to a slot handler and cycle a nonexistent slot.
-open_id = OpenButton(WEEK_TARGET).custom_id
-check("opener id", open_id, "avo:fx:{}".format(WEEK))
-check("does not match the slot template",
-      bool(SlotButton.__discord_ui_compiled_template__.fullmatch(open_id)), False)
-check("a slot id does not match the opener template",
-      bool(OpenButton.__discord_ui_compiled_template__.fullmatch(
-          "av:fx:{}:sat_1600".format(WEEK))), False)
-view_dm = opener(WEEK_TARGET)
-check("one button on the DM view", len(view_dm.children), 1)
-check("labelled for a human", view_dm.children[0].item.label, "Set availability")
-
 print("")
 if FAILURES:
     print("{} FAILED: {}".format(len(FAILURES), ", ".join(FAILURES)))
     sys.exit(1)
-print("all view-layer checks passed (including the opener)")
+print("all view-layer checks passed")

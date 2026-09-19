@@ -109,10 +109,6 @@ class SelectorState:
         ]
         return "\n".join(parts) if parts else "-"
 
-    def button_label(self, slot):
-        return "{} {}".format(self.picks[slot.key].emoji, slot.label)
-
-
 def describe_choice(state):
     """One-line summary for the confirmation and for the staff log."""
     if not state.any_chosen:
@@ -120,11 +116,6 @@ def describe_choice(state):
     return ", ".join(
         "{} {} {}".format(s.day, s.label, state.get(s.key).word) for s in state.chosen
     )
-
-
-def rows_needed(slot_count):
-    """How many action rows a day's slots will take (5 buttons per row)."""
-    return (slot_count + 4) // 5
 
 
 def fits_on_one_message(state):

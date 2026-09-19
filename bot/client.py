@@ -32,7 +32,7 @@ TICK_MINUTES = 5
 
 
 class PRSBot(discord.Client):
-    def __init__(self, fast_sync=False):
+    def __init__(self, fast_sync=False, store=None):
         # Testing only. Global commands can take up to an hour to reach a
         # client; a guild sync is instant. It makes every command appear twice
         # in this server until a normal restart, which clears the guild copies
@@ -45,7 +45,7 @@ class PRSBot(discord.Client):
         super().__init__(intents=discord.Intents(guilds=True))
         self.tree = app_commands.CommandTree(self)
         self.tree.on_error = self.on_tree_error
-        self.store = Store()
+        self.store = store or Store()
         self.timings = None
         self.slots = []
 
@@ -165,15 +165,6 @@ class PRSBot(discord.Client):
             log.warning("could not post in %s: %s", getattr(channel, "id", "?"), error)
             return None
 
-    async def referee_channel(self, week):
-        if config.REF_CHANNEL_ID:
-            try:
-                return self.get_channel(config.REF_CHANNEL_ID) or \
-                    await self.fetch_channel(config.REF_CHANNEL_ID)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
-                log.warning("referee channel unreachable: %s", error)
-        return await self.channel_for(week)
-
     async def on_availability_submitted(self, week):
         """Called by the submit button with the week just submitted for.
 
@@ -272,7 +263,7 @@ class PRSBot(discord.Client):
         huge week needs it), and the claim menu embed under it."""
         bodies, prompt, view, digest = self.ref_board_payload(week)
         # Spoilered so it still notifies the role without shouting at the top
-        # of the post - same idea the old text board used.
+        # of the post.
         mention = ("<@&{}>".format(config.REFEREE_ROLE_ID)
                   if config.REFEREE_ROLE_ID else None)
         content = "||{}||".format(mention) if mention else None

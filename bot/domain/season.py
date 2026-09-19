@@ -69,12 +69,6 @@ KICKOFF_FLOOR = uk_local_to_utc(datetime(2026, 9, 17, 17, 30))
 DEADLINE_WEEKDAY_OFFSET = -1          # Friday - 1 = Thursday
 DEADLINE_LOCAL_TIME = time(0, 0)
 
-# How many gameweeks past the current one managers may schedule into. The
-# league allows two, but only with an Officials' unlock - so the default is
-# zero and staff open a gameweek early when they choose to.
-DEFAULT_ADVANCE = 0
-MAX_ADVANCE = 2
-
 # Each gameweek's Friday, from the published Season 17 schedule. The knockout
 # rounds are listed too so the calendar is complete; their fixtures get added
 # once the draws are made.
@@ -349,10 +343,6 @@ class Gameweek:
         concatenate the two instead of handling them differently."""
         return [(home, away, UEFA_LEAGUE) for home, away in UEFA_FIXTURES.get(self.key, [])]
 
-    @property
-    def has_uefa_fixtures(self):
-        return bool(self.uefa_fixtures)
-
     def __repr__(self):
         return "<{} {}>".format(self.key, self.friday.date())
 
@@ -381,15 +371,6 @@ def current(now):
         if now < gw.friday + timedelta(days=3):
             return gw
     return ALL[-1] if ALL else None
-
-
-def upcoming(now, advance=DEFAULT_ADVANCE):
-    """The gameweeks a manager may set availability for right now."""
-    here = current(now)
-    if here is None:
-        return []
-    start = ALL.index(here)
-    return ALL[start:start + 1 + max(0, min(advance, MAX_ADVANCE))]
 
 
 def team_name(code):
@@ -469,14 +450,6 @@ def validate(sheet_team_names):
             problems.append("UEFA fixtures for unknown gameweek '{}'".format(key))
 
     return problems
-
-
-def league_of(gameweek_key, home_code, away_code):
-    """Which league a fixture belongs to, or None if it isn't in the list."""
-    for home, away, league in FIXTURES.get(gameweek_key, []):
-        if (home, away) == (home_code, away_code):
-            return league
-    return None
 
 
 def usable_emoji(emoji):

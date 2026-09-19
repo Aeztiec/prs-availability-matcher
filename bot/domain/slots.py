@@ -1,7 +1,7 @@
 """The slot vocabulary both scheduling paths share.
 
 There are two ways a fixture gets a time: managers picking preferences in
-Discord, and the fallback matcher reading the timings sheet. They have to agree
+Discord, and the fallback reading the timings sheet. They have to agree
 on what a slot *is*, or the fallback can hand back a time the selector never
 offered and vice versa. So the slots come from one place - the sheet - and the
 Discord selector is built from the same list.

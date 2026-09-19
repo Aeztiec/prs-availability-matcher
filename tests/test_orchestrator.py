@@ -14,15 +14,14 @@ import os
 import random
 import sys
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from bot.db import Store
 from bot.domain.orchestrator import Action, advance, dashboard, run_once, run_once_randomly
-from bot.domain.scheduling import Pref, Source, Status
+from bot.domain.scheduling import Source, Status
 from bot.domain.slots import Slot, clean_day, slot_key
 from bot.domain.weeks import (
     discord_time,
-    parse_deadline,
     reminders_due,
     slot_datetime,
     to_iso,
@@ -90,34 +89,6 @@ def new_fixture(store, home="ABC FC", away="XYZ FC", home_id=111, away_id=222):
     return store.create_fixture("S17_Clubs", WEEK, home, away, home_id, away_id,
                                 to_iso(DEADLINE), Status.WAITING_FOR_AVAILABILITY)
 
-
-# --------------------------------------------------------------------------
-print("\ndeadline parsing")
-# --------------------------------------------------------------------------
-now = utc(2026, 9, 8, 12)     # a Tuesday
-check("ISO with space", parse_deadline("2026-09-11 18:00", now), DEADLINE)
-check("ISO with T", parse_deadline("2026-09-11T18:00", now), DEADLINE)
-check("named day", parse_deadline("Friday 18:00", now), DEADLINE)
-check("short day", parse_deadline("fri 18:00", now), DEADLINE)
-check("12-hour clock", parse_deadline("Friday 6pm", now), DEADLINE)
-check("bare hour", parse_deadline("Friday 18", now), DEADLINE)
-
-print("\na weekday already gone today rolls to next week")
-friday_evening = utc(2026, 9, 11, 20)
-check("Friday 18:00 asked on Friday 20:00 -> next Friday",
-      parse_deadline("Friday 18:00", friday_evening), utc(2026, 9, 18, 18))
-check("later today is still today",
-      parse_deadline("Friday 22:00", friday_evening), utc(2026, 9, 11, 22))
-
-print("\nbad input explains itself")
-for bad, expect in [("", "Give a deadline"), ("whenever", "Couldn't read"),
-                    ("Frunday 18:00", "isn't a day I recognise"),
-                    ("Friday 99:00", "isn't a real time")]:
-    try:
-        parse_deadline(bad, now)
-        check("{!r} rejected".format(bad), "no error", "an error")
-    except ValueError as error:
-        check("{!r} -> {}".format(bad, expect), expect in str(error), True)
 
 # --------------------------------------------------------------------------
 print("\nmatch weekends")

@@ -11,7 +11,7 @@ import tempfile
 
 from bot.db import Store
 from bot.domain.scheduling import Pref, Source, Status, schedule_from_preferences
-from bot.ui.selector import SelectorState, describe_choice, fits_on_one_message, rows_needed
+from bot.ui.selector import SelectorState, describe_choice, fits_on_one_message
 from bot.domain.slots import Slot, clean_day, slot_key
 
 FAILURES = []
@@ -74,7 +74,6 @@ store.save_weekly_submission(WEEK, 111, state.as_dict())
 saved = store.weekly_submission(WEEK, 111)
 check("picks persisted", saved["slots"], {"sat_1700": 1, "sat_1800": 2, "sun_1700": 0, "sun_1800": 0})
 check("not yet flagged submitted", saved["submitted"], 0)
-check("both_submitted is false", store.both_submitted(fid), False)
 
 print("\nre-opening the selector restores what was saved")
 reopened = SelectorState(SLOTS, saved=saved["slots"])
@@ -105,7 +104,6 @@ print("\nboth managers submitted -> the engine can run")
 # --------------------------------------------------------------------------
 away = SelectorState(SLOTS, saved={"sat_1800": 2, "sun_1700": 1})
 store.save_weekly_submission(WEEK, 222, away.as_dict(), submitted=True)
-check("both submitted", store.both_submitted(fid), True)
 
 home_picks = store.weekly_submission(WEEK, 111)["slots"]
 away_picks = store.weekly_submission(WEEK, 222)["slots"]
@@ -170,7 +168,6 @@ check("is_active_referee false for a deactivated one", store.is_active_referee(9
 check("is_active_referee false for an unknown id", store.is_active_referee(999), False)
 
 store.claim_referee(fid, 901, "REF")
-check("workload counted", store.ref_workload(WEEK), {901: 1})
 check("roster has the referee",
       [(r["referee_id"], r["role"]) for r in store.fixture_referees(fid)], [(901, "REF")])
 
@@ -242,8 +239,6 @@ check("and it updates the away side too when that's the team",
 # --------------------------------------------------------------------------
 print("\nDiscord's component budget")
 # --------------------------------------------------------------------------
-check("7 slots need 2 rows", rows_needed(7), 2)
-check("15 slots need 3 rows", rows_needed(15), 3)
 check("a real hourly day fits", fits_on_one_message(SelectorState(SLOTS)), True)
 too_many = make_slots(*[("Saturday", 600 + 30 * i) for i in range(20)])
 check("20 slots in a day does not fit",

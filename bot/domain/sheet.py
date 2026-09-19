@@ -198,10 +198,6 @@ class Team:
     def has_submitted(self):
         return any(state is not None for state in self.availability.values())
 
-    def is_free(self, slot):
-        return self.availability.get(slot.col) == "free"
-
-
 class Sheet:
     def __init__(self, slots, teams):
         self.slots = slots

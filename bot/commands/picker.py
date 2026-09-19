@@ -22,7 +22,7 @@ def game_picker(bot):
         async def complete(interaction, current: str):
             try:
                 choices = await find(current)
-                log.info("game autocomplete for %r: %d choices", current, len(choices))
+                log.debug("game autocomplete for %r: %d choices", current, len(choices))
                 return choices
             except Exception:
                 log.exception("game autocomplete failed")

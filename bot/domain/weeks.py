@@ -12,19 +12,9 @@ checks, so it has to be derived the same way every time.
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timedelta, timezone
 
 SATURDAY = 5  # weekday() index
-
-WEEKDAYS = {
-    "monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1,
-    "wednesday": 2, "wed": 2, "thursday": 3, "thu": 3, "thurs": 3,
-    "friday": 4, "fri": 4, "saturday": 5, "sat": 5, "sunday": 6, "sun": 6,
-}
-
-_ISO = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})")
-_DAY_TIME = re.compile(r"^([a-z]+)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$", re.I)
 
 
 def utcnow():
@@ -39,61 +29,11 @@ def from_iso(text):
     return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def parse_deadline(text, now=None):
-    """Read a staff-typed deadline as an aware UTC datetime.
-
-    Accepts '2026-09-11 18:00' and 'Friday 18:00' / 'fri 6pm'. A bare weekday
-    means the next one strictly in the future, so typing 'Friday' on a Friday
-    gets next Friday rather than a deadline that has already passed.
-
-    Raises ValueError with something a human can act on.
-    """
-    now = now or utcnow()
-    text = (text or "").strip()
-    if not text:
-        raise ValueError("Give a deadline, e.g. 'Friday 18:00' or '2026-09-11 18:00'.")
-
-    iso = _ISO.match(text)
-    if iso:
-        year, month, day, hour, minute = (int(g) for g in iso.groups())
-        if hour > 23 or minute > 59:
-            raise ValueError("'{}' isn't a real time.".format(text))
-        return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
-
-    named = _DAY_TIME.match(text)
-    if named:
-        word, hour, minute, meridiem = named.groups()
-        weekday = WEEKDAYS.get(word.lower())
-        if weekday is None:
-            raise ValueError(
-                "'{}' isn't a day I recognise. Try 'Friday 18:00'.".format(word)
-            )
-        hour = int(hour)
-        minute = int(minute or 0)
-        if meridiem:
-            hour = hour % 12 + (12 if meridiem.lower() == "pm" else 0)
-        if hour > 23 or minute > 59:
-            raise ValueError("'{}' isn't a real time.".format(text))
-        ahead = (weekday - now.weekday()) % 7
-        candidate = (now + timedelta(days=ahead)).replace(
-            hour=hour, minute=minute, second=0, microsecond=0
-        )
-        if candidate <= now:
-            candidate += timedelta(days=7)
-        return candidate
-
-    raise ValueError(
-        "Couldn't read '{}' as a deadline. Use 'Friday 18:00' or "
-        "'2026-09-11 18:00' (UTC).".format(text)
-    )
-
-
 def week_of(moment):
     """The match weekend a deadline belongs to: the next Saturday on or after it.
 
-    Friday fixtures sit the day *before* that Saturday, matching how the
-    website anchors its three days, so a Friday deadline and a Friday kickoff
-    still belong to the same weekend.
+    Friday fixtures sit the day *before* that Saturday, so a Friday deadline
+    and a Friday kickoff still belong to the same weekend.
     """
     ahead = (SATURDAY - moment.weekday()) % 7
     return (moment + timedelta(days=ahead)).date().isoformat()
@@ -175,19 +115,6 @@ def uk_local_to_utc(naive_local):
     if start <= guess < end:
         return guess - timedelta(hours=1)
     return guess
-
-
-def format_uk(moment):
-    """'Thursday, 17 September 2026 00:00 BST' - a fixed UK wall-clock time.
-
-    %d would zero-pad the day (e.g. "07"); day-of-month is built by hand
-    instead to avoid that, since %-d/%#d are not portable between platforms.
-    """
-    local, label = uk_time(moment)
-    return "{}, {} {} {} {:02d}:{:02d} {}".format(
-        local.strftime("%A"), local.day, local.strftime("%B"), local.year,
-        local.hour, local.minute, label,
-    )
 
 
 def reminders_due(deadline, now, offsets_hours, already_sent):

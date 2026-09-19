@@ -25,7 +25,6 @@ from bot.ui.notify import (
     fixture_board,
     group_embeds_for_messages,
     league_tag,
-    referee_board,
 )
 from bot.domain.orchestrator import dashboard
 from bot.domain.scheduling import Source, Status

@@ -28,9 +28,6 @@ class Timings:
     def title(self):
         return self.competition.title
 
-    def team_names(self):
-        return [(t.country, t.player) for t in self.sheet.teams]
-
     def find_team(self, name):
         """Resolve a team by country or player name. Raises LookupError."""
         return self.sheet.find(name)

@@ -4,8 +4,8 @@ Message text only - no sending, no Discord objects - so the wording can be
 checked in tests and changed without touching the logic.
 
 Times go out as Discord timestamps (<t:...:F>), which each reader's client
-renders in their own timezone. The league spans several, and the whole point of
-the original matcher was to stop people converting GMT in their heads.
+renders in their own timezone. The league spans several, so nobody should have
+to convert GMT in their head.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from bot.domain.referees import MAX_ASSISTANTS, ROLE_AR, ROLE_REF
 from bot.domain.scheduling import Source
 
 from bot.ui.text import plural
-from bot.domain.weeks import discord_time, from_iso, slot_datetime, week_saturday
+from bot.domain.weeks import discord_time, from_iso, slot_datetime
 
 @dataclass
 class BoardEmbed:

@@ -9,12 +9,9 @@ import random
 import sys
 
 from bot.domain.scheduling import (
-    Candidate,
     Pref,
     Source,
     Status,
-    candidates_from_preferences,
-    choose,
     combined_score,
     schedule_from_preferences,
     schedule_from_sheet,

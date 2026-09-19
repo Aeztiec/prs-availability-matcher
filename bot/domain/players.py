@@ -12,7 +12,6 @@ import difflib
 import os
 
 from bot.paths import PLAYERS_CSV as DEFAULT_PATH
-FREE_AGENT = "FREE AGENT"
 CLASS_ORDER = ["X", "S", "A", "B", "C"]   # best to worst
 
 

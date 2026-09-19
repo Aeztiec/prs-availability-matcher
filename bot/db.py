@@ -18,6 +18,7 @@ Two things are load-bearing:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -70,8 +71,7 @@ CREATE TABLE IF NOT EXISTS referees (
 
 -- First-come-first-served officiating. A fixture takes at most one REF claim
 -- and two AR (assistant/VAR) claims - see referees.next_open_role. Claiming is
--- public and instant: there is no availability to submit and no offer to wait
--- on, unlike the old ranked-offer system this replaced.
+-- public and instant: there is no availability to submit and no offer to wait on.
 CREATE TABLE IF NOT EXISTS fixture_referees (
     fixture_id  INTEGER NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
     referee_id  INTEGER NOT NULL,
@@ -170,11 +170,19 @@ class Store:
         if "message_ids" not in board_columns:
             conn.execute("ALTER TABLE boards ADD COLUMN message_ids TEXT")
 
+    @contextlib.contextmanager
     def _connect(self):
+        """A connection for one unit of work: committed on success, rolled back
+        on an error, and always closed (sqlite3's own `with` never closes, which
+        leaves the file locked on Windows)."""
         conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     # ---------------------------------------------------------------- log
     def note(self, fixture_id, event, detail=None):
@@ -313,16 +321,6 @@ class Store:
         for fixture_id in fixture_ids:
             self.note(fixture_id, "manager submitted", str(manager_id))
 
-    def both_submitted(self, fixture_id):
-        """Have both of a fixture's managers submitted their week yet?"""
-        fixture = self.fixture(fixture_id)
-        if not fixture:
-            return False
-        return all(
-            (self.weekly_submission(fixture["week"], mid) or {}).get("submitted")
-            for mid in (fixture["home_manager_id"], fixture["away_manager_id"])
-        )
-
     # ----------------------------------------------------------- referees
     def add_referee(self, discord_id, name, tier=None, roblox=None):
         """Register (or re-activate) a referee. A new one starts at tier 1; an
@@ -416,18 +414,6 @@ class Store:
             return conn.execute(sql, args).fetchone() is not None
 
     # ------------------------------------------------------- ref workload
-    def ref_workload(self, week, competition=None):
-        """referee_id -> fixtures officiated (any role) this week, for /refs list."""
-        sql = ("SELECT fr.referee_id, COUNT(*) AS n FROM fixture_referees fr "
-               "JOIN fixtures f ON f.id = fr.fixture_id WHERE f.week=?")
-        args = [week]
-        if competition:
-            sql += " AND f.competition=?"
-            args.append(competition)
-        with self._connect() as conn:
-            return {r["referee_id"]: r["n"]
-                    for r in conn.execute(sql + " GROUP BY fr.referee_id", args)}
-
     # ------------------------------------------------- scheduling context
     def slot_load(self, week, competition=None):
         """slot_key -> how many fixtures are already in it."""
@@ -509,16 +495,6 @@ class Store:
             except (ValueError, TypeError):
                 pass
         return [record["message_id"]]
-
-    def set_board_digest(self, week, digest):
-        """Remember what was last published, so an unchanged board is not edited.
-
-        The runner wakes every few minutes; without this it would rewrite the
-        same message all day and burn rate limit for nothing.
-        """
-        with self._connect() as conn:
-            conn.execute("UPDATE boards SET digest=?, updated_at=? WHERE week=?",
-                         (digest, now(), week))
 
     def forget_board(self, week):
         with self._connect() as conn:

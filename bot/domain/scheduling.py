@@ -106,15 +106,6 @@ class Decision:
         return self.slot is not None
 
 
-def _busy_slots(team_fixtures):
-    """Slot keys where a team already has a fixture.
-
-    A hard exclusion, not a ranking penalty: a team cannot be in two places at
-    once, so these slots are not candidates at all.
-    """
-    return {key for key in team_fixtures}
-
-
 def candidates_from_preferences(slots, home_prefs, away_prefs, load=None, busy=()):
     """Valid slots with their combined scores, best first."""
     load = load or {}
