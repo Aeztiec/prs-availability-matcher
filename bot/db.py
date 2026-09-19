@@ -21,11 +21,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import shutil
 import sqlite3
 from datetime import datetime, timezone
 
-from bot.paths import DB_PATH, LEGACY_DB_PATH
+from bot.paths import DB_PATH
 
 DEFAULT_PATH = DB_PATH
 
@@ -134,20 +133,10 @@ def now():
 class Store:
     def __init__(self, path=DEFAULT_PATH):
         self.path = path
-        if path == DB_PATH:
-            self._adopt_legacy_database()
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with self._connect() as conn:
             conn.executescript(SCHEMA)
             self._migrate(conn)
-
-    @staticmethod
-    def _adopt_legacy_database():
-        """The database used to sit inside the package. Bring an existing one
-        to its new home the first time; the old file is left as a backup."""
-        if not os.path.exists(DB_PATH) and os.path.exists(LEGACY_DB_PATH):
-            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-            shutil.copy2(LEGACY_DB_PATH, DB_PATH)
 
     def _migrate(self, conn):
         """Add columns that arrived after the first release.
