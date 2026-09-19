@@ -1,3 +1,2 @@
-# The scheduled Action commits data.js from Linux while local edits come from
-# Windows. Normalise to LF in the repo so that never shows up as a diff.
+# Normalise line endings to LF in the repo so edits from Windows never show up as diffs.
 * text=auto eol=lf

@@ -22,24 +22,41 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
-from . import config, notify, referees, results, season
-from .db import Store
-from .ref_views import (
-    REF_DYNAMIC_ITEMS, ClaimSelect, claim_options, game_name, matchup, staff_game_name,
+from bot import config
+from bot.ui import notify, results
+from bot.domain import referees, season
+from bot.db import Store
+from bot.ui.ref_views import (
+    REF_DYNAMIC_ITEMS,
+    ClaimSelect,
+    claim_options,
+    game_name,
+    matchup,
+    staff_game_name,
 )
-from .text import plural
-from .fallback import Timings
-from .players import Players
-from .orchestrator import Action, dashboard, run_once, run_once_randomly
-from .scheduling import Status
-from .selector import fits_on_one_message, SelectorState
-from .slots import within_kickoff_window
-from .views import (
-    DYNAMIC_ITEMS, SCOPE_FIXTURE, Target, availability_button,
-    opener, open_selector,
+from bot.ui.text import plural
+from bot.domain.fallback import Timings
+from bot.domain.players import Players
+from bot.domain.orchestrator import Action, dashboard, run_once, run_once_randomly
+from bot.domain.scheduling import Status
+from bot.ui.selector import fits_on_one_message, SelectorState
+from bot.domain.slots import within_kickoff_window
+from bot.ui.views import (
+    DYNAMIC_ITEMS,
+    SCOPE_FIXTURE,
+    Target,
+    availability_button,
+    opener,
+    open_selector,
 )
-from .weeks import (
-    from_iso, parse_deadline, slot_datetime, to_iso, uk_time, utcnow, week_of,
+from bot.domain.weeks import (
+    from_iso,
+    parse_deadline,
+    slot_datetime,
+    to_iso,
+    uk_time,
+    utcnow,
+    week_of,
 )
 
 log = logging.getLogger("prsbot")

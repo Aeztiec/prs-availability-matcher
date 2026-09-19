@@ -1,11 +1,10 @@
-# Note: timings/*.html are NOT ignored - they are the source of truth for
-# which competitions exist, and the Action rebuilds docs/data.js from them.
-
 __pycache__/
 *.pyc
 
 # Bot secrets - the Discord token must never be committed to a public repo.
 .env
+
+# The bot's own database.
 *.db
 *.sqlite3
 

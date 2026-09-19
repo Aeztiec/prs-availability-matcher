@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import os
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ENV_FILE = os.path.join(os.path.dirname(HERE), ".env")
+from bot.paths import ENV_FILE
 
 
 def _load_env_file(path=ENV_FILE):
