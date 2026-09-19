@@ -19,6 +19,7 @@ import discord
 
 from bot.ui import notify
 from bot.domain import season
+from bot.ui.render import to_discord_embed
 from bot.ui.selector import SelectorState, describe_choice
 
 # --------------------------------------------------------------------------
@@ -125,24 +126,6 @@ LEGEND = chr(10).join(["**How to mark each time slot:**", "⚪ No", "🟡 Fine",
 CYCLE_HINT = "Click a time to cycle it."
 
 
-def _discord_embed(board_embed):
-    """Turn a notify.BoardEmbed into the real discord.Embed the API wants.
-
-    Duplicates main.py's helper of the same name rather than importing it -
-    main.py imports this module, so the reverse import would cycle.
-    """
-    embed = discord.Embed(description=board_embed.description,
-                          color=discord.Color(season.EMBED_COLOR))
-    if board_embed.title:
-        embed.title = board_embed.title
-    if board_embed.footer:
-        embed.set_footer(text=board_embed.footer)
-    for name, value, inline in board_embed.fields:
-        embed.add_field(name=name, value=value, inline=inline)
-    embed.set_image(url=season.EMBED_WIDTH_IMAGE)
-    return embed
-
-
 def _resolve_active_day(state, active_day):
     days = state.days
     return active_day if active_day in days else (days[0] if days else None)
@@ -193,7 +176,7 @@ def build_view(target, state, active_day=None):
 async def refresh(interaction, store, target, state, active_day=None):
     embed, active_day = build_message(store, target, interaction.user.id, state, active_day)
     view, _ = build_view(target, state, active_day)
-    await interaction.response.edit_message(embed=_discord_embed(embed), view=view)
+    await interaction.response.edit_message(embed=to_discord_embed(embed), view=view)
 
 
 async def open_selector(interaction, store, target, slots, ephemeral=True):
@@ -202,7 +185,7 @@ async def open_selector(interaction, store, target, slots, ephemeral=True):
     state = SelectorState(slots, saved=saved, submitted=submitted)
     embed, active_day = build_message(store, target, interaction.user.id, state)
     view, _ = build_view(target, state, active_day)
-    await interaction.response.send_message(embed=_discord_embed(embed), view=view,
+    await interaction.response.send_message(embed=to_discord_embed(embed), view=view,
                                             ephemeral=ephemeral)
 
 
