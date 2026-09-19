@@ -84,6 +84,18 @@ def setup(bot):
             title="Referees", description=(chr(10) * 2).join(sections))
         await interaction.response.send_message(embed=to_discord_embed(embed), ephemeral=True)
 
+    @refs_group.command(name="leaderboard",
+                        description="Games officiated by each referee, from posted results")
+    @staff_only()
+    async def refs_leaderboard(interaction):
+        names = {r["discord_id"]: r.get("roblox") or r["name"]
+                 for r in store.referees(active_only=False)}
+        await interaction.response.send_message(
+            embed=to_discord_embed(notify.referee_leaderboard(
+                store.referee_leaderboard(), names)),
+            ephemeral=True,
+        )
+
     @refs_group.command(name="assign", description="Assign a referee by hand")
     @app_commands.describe(
         game="The game - pick from the list as you type",
@@ -133,6 +145,7 @@ def setup(bot):
                 user.mention, referees.ROLE_LABEL[chosen_role], name),
             ephemeral=True,
         )
+        await bot.announce_suspensions(record, [user.id])
 
     refs_assign.autocomplete("game")(game_autocomplete(needs_time=True))
 

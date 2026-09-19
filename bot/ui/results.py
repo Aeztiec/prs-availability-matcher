@@ -141,11 +141,38 @@ def score_line(fixture, home_score, away_score, pens=None):
     return line
 
 
-def build(fixture, home_score, away_score, stats_home, stats_away, motm,
-          officials, players, competition=None, round_name=None, pens=None):
+_OFFICIAL = re.compile(
+    r"^(?P<name>.+?)\s+-\s+(?P<role>main referee|assistant referee|referee|assistant)\b",
+    re.IGNORECASE)
+
+
+def parse_official(line):
+    """('name', 'REF' | 'AR' | None) from 'moh1d - Main Referee [Full 90']'."""
+    text = line.lstrip("@").strip()
+    match = _OFFICIAL.match(text)
+    if match:
+        role = "REF" if match.group("role").lower() in ("main referee", "referee") else "AR"
+        return match.group("name").strip(), role
+    return text.split(" - ")[0].strip(), None
+
+
+def build(*args, **kwargs):
     """(text, problems). text is None when there is anything to fix first."""
+    text, problems, _ = build_full(*args, **kwargs)
+    return text, problems
+
+
+def build_full(fixture, home_score, away_score, stats_home, stats_away, motm,
+               officials, players, competition=None, round_name=None, pens=None):
+    """(text, problems, data): the post, what to fix first, and the same result
+    as plain rows to store. data is None whenever there is anything to fix.
+
+    data["players"]   username, club, starter, goals, assists, yellows, reds
+    data["officials"] name and role (REF, AR or None)
+    """
     home, away = fixture["home_team"], fixture["away_team"]
     problems = []
+    collected = []
 
     def check(name, club_needed=None):
         record = players.find(name)
@@ -175,8 +202,13 @@ def build(fixture, home_score, away_score, stats_home, stats_away, motm,
                     else "Use " + TOKEN_HELP + "."))
                 continue
             record = check(name, club)
-            if record:
-                target.append((record["username"], keys))
+            if not record:
+                continue
+            if any(record["username"] == n for n, _ in starters + bench):
+                problems.append("**{}** is listed twice for {}.".format(
+                    record["username"], club.title()))
+                continue
+            target.append((record["username"], keys))
         rows = []
         for group, label in ((starters, None), (bench, "**BENCH:**")):
             if not group:
@@ -186,6 +218,11 @@ def build(fixture, home_score, away_score, stats_home, stats_away, motm,
             for name, keys in sorted(group, key=_stat_order):
                 rows.append(_row(club, " ".join(
                     [esc(name)] + [show(k) for k in keys])))
+                collected.append({
+                    "username": name, "club": club, "starter": group is starters,
+                    "goals": keys.count("goal"), "assists": keys.count("assist"),
+                    "yellows": keys.count("yellow"), "reds": keys.count("red"),
+                })
         return rows
 
     home_rows = team_block(stats_home, home)
@@ -207,7 +244,7 @@ def build(fixture, home_score, away_score, stats_home, stats_away, motm,
                                   + (" - " + esc(note.strip()) if note.strip() else "")))
 
     if problems:
-        return None, problems
+        return None, problems, None
 
     badge = season.SEASON_EMOJI if season.usable_emoji(season.SEASON_EMOJI) else "•"
     parts = [
@@ -227,5 +264,9 @@ def build(fixture, home_score, away_score, stats_home, stats_away, motm,
     text = "\n\n".join(parts)
     if len(text) > DESCRIPTION_LIMIT:
         return None, ["That result is too long to post ({} characters). Trim the "
-                      "MOTM notes or the bench.".format(len(text))]
-    return text, []
+                      "MOTM notes or the bench.".format(len(text))], None
+    data = {
+        "players": collected,
+        "officials": [{"name": n, "role": r} for n, r in map(parse_official, crew)],
+    }
+    return text, [], data

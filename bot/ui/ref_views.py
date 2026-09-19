@@ -125,6 +125,7 @@ class ClaimSelect(
         # they're separate messages from whatever this select is attached to
         # once the board has grown past one chunk.
         await interaction.client.refresh_ref_board(self.week)
+        await interaction.client.announce_suspensions(fixture, [interaction.user.id])
 
 
 REF_DYNAMIC_ITEMS = (ClaimSelect,)

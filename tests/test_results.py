@@ -9,7 +9,7 @@ import sys
 
 from bot.domain import season
 from bot.domain.players import Players
-from bot.ui.results import build, header, parse_line, score_line
+from bot.ui.results import build, build_full, header, parse_line, parse_official, score_line
 
 FAILURES = []
 
@@ -117,6 +117,30 @@ check("officiating team keeps role and minutes",
 check("nobody is pinged", "<@" in text, False)
 check("no MOTM section when there are none",
       "MOTM" in build(FIXTURE, 1, 0, "vzcadc", "", "", "", SHEET)[0], False)
+
+print("\nwhat gets stored")
+_, _, data = build_full(
+    FIXTURE, 5, 0, "danielfly a g\nvzcadc g g yc rc\nBENCH\nbenchguy on70", "FelipeF\nom_ena rc",
+    "", "moh1d - Main Referee [Full 90']\nj5rdi - Assistant Referee [Till '90]", SHEET)
+rows = {p["username"]: p for p in data["players"]}
+check("goals, assists and cards are totalled",
+      (rows["vzcadc"]["goals"], rows["vzcadc"]["yellows"], rows["vzcadc"]["reds"],
+       rows["danielfly"]["assists"], rows["danielfly"]["goals"]), (2, 1, 1, 1, 1))
+check("starters and bench are told apart",
+      (rows["vzcadc"]["starter"], rows["benchguy"]["starter"]), (True, False))
+check("both teams are stored", sorted({p["club"] for p in data["players"]}),
+      ["FC PORTO", "PARIS SAINT-GERMAIN"])
+check("officials keep their role", data["officials"],
+      [{"name": "moh1d", "role": "REF"}, {"name": "j5rdi", "role": "AR"}])
+check("nothing is stored while there is something to fix",
+      build_full(FIXTURE, 1, 0, "ghost g", "", "", "", SHEET)[2], None)
+check("a player listed twice is refused",
+      build_full(FIXTURE, 1, 0, "vzcadc g\nvzcadc a", "", "", "", SHEET)[1],
+      ["**vzcadc** is listed twice for Fc Porto."])
+check("an official line with no role still gives a name",
+      parse_official("@moh1d"), ("moh1d", None))
+check("assistant is understood", parse_official("j5rdi - Assistant Referee [From '90]"),
+      ("j5rdi", "AR"))
 
 print("\nthings that stop the post")
 _, wrong_team = build(FIXTURE, 1, 0, "nobody_fc g", "", "", "", SHEET)

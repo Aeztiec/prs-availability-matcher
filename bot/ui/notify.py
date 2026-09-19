@@ -14,10 +14,11 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from bot.domain import season
+from bot.domain import discipline, season
 from bot.domain.referees import MAX_ASSISTANTS, ROLE_AR, ROLE_REF
 from bot.domain.scheduling import Source
 
+from bot.ui.results import esc
 from bot.ui.text import plural
 from bot.domain.weeks import discord_time, from_iso, slot_datetime
 
@@ -562,7 +563,7 @@ def dashboard_summary(buckets, week, waiting_on=None, reasons=None, rosters=None
     return embed
 
 
-def fixture_detail(fixture, history, slot=None, roster=()):
+def fixture_detail(fixture, history, slot=None, roster=(), suspended=()):
     """One game for staff: who is playing, where it stands, and the log of
     what the automation has done to it."""
     embed = BoardEmbed(
@@ -583,6 +584,8 @@ def fixture_detail(fixture, history, slot=None, roster=()):
                                            fixture["schedule_source"] or "-"), True))
     if roster:
         embed.fields.append(("Officials", _roster_line(roster), False))
+    if suspended:
+        embed.fields.append(("Suspended players", _rows_field(list(suspended)), False))
     if history:
         rows = ["`{}` {}{}".format(
             entry["at"][11:16], entry["event"],
@@ -590,3 +593,84 @@ def fixture_detail(fixture, history, slot=None, roster=()):
             for entry in history[-10:]]
         embed.fields.append(("Scheduling log", _rows_field(rows, shown=10), False))
     return embed
+
+
+# --------------------------------------------------------------------------
+# suspensions and the referee leaderboard
+# --------------------------------------------------------------------------
+
+def _gameweek_label(fixture):
+    return (fixture or {}).get("gameweek") or "an earlier game"
+
+
+def suspension_reason(standing, fixtures):
+    """'red card in GW2' - what put someone out. `fixtures` is {id: fixture}."""
+    labels = [_gameweek_label(fixtures.get(i)) for i in standing.triggers]
+    if standing.kind == discipline.RED:
+        return "red card in {}".format(labels[0])
+    if standing.kind == discipline.SECOND_YELLOW:
+        return "two yellow cards in {}".format(labels[0])
+    return "yellow cards in {} and {}".format(labels[0], labels[-1])
+
+
+def suspension_rows(items, fixtures):
+    """One line per suspended player: 'badge | name - red card in GW2'."""
+    return ["{} | {} - {}".format(
+        season.label_for(item["club"]), esc(item["username"]),
+        suspension_reason(item["standing"], fixtures)) for item in items]
+
+
+def suspension_notice(fixture, items, fixtures):
+    """The message a game's referees are pinged with: who cannot play."""
+    return BoardEmbed(
+        title="Suspended players",
+        description="{}\n\n{}".format(_game(fixture), chr(10).join(suspension_rows(items, fixtures))),
+        footer="These players must not play in this game. Please check the lineups.",
+    )
+
+
+def suspension_list(items, fixtures, game_of):
+    """Everyone currently suspended, for staff. game_of(fixture_id) is the game
+    they miss, or None when their club has no next game in the calendar yet."""
+    if not items:
+        return BoardEmbed(title="Suspensions", description="No one is suspended. \u2705")
+    rows = []
+    for item in items:
+        standing = item["standing"]
+        game = game_of(standing.game) if standing.game else None
+        competition = "UEFA" if item["group"] == discipline.UEFA else "domestic"
+        rows.append("{} | {} - {}, misses {} ({})".format(
+            season.label_for(item["club"]), esc(item["username"]),
+            suspension_reason(standing, fixtures),
+            _game(game) if game else "their next game, not scheduled yet", competition))
+    return BoardEmbed(title="Suspensions", description=chr(10).join(rows),
+                      footer="Worked out from the results posted so far.")
+
+
+MEDALS = {1: "\U0001F947", 2: "\U0001F948", 3: "\U0001F949"}
+LEADERBOARD_ROWS = 25
+
+
+def referee_leaderboard(rows, names=None):
+    """Games officiated, most first. names maps a registered referee's id to
+    the name to show; anyone else shows as typed on their results."""
+    names = names or {}
+    if not rows:
+        return BoardEmbed(
+            title="Referee leaderboard",
+            description="No games counted yet. They are counted from posted results.")
+    lines, rank, previous = [], 0, None
+    for position, row in enumerate(rows[:LEADERBOARD_ROWS], start=1):
+        if row["games"] != previous:
+            rank, previous = position, row["games"]
+        who = esc(names.get(row["referee_id"]) or row["name"])
+        detail = []
+        if row["as_referee"]:
+            detail.append("{} as referee".format(row["as_referee"]))
+        if row["as_assistant"]:
+            detail.append("{} as assistant".format(row["as_assistant"]))
+        lines.append("{} **{}** - {}{}".format(
+            MEDALS.get(rank, "{}.".format(rank)), who, plural(row["games"], "game"),
+            " ({})".format(", ".join(detail)) if detail else ""))
+    return BoardEmbed(title="Referee leaderboard", description=chr(10).join(lines),
+                      footer="Counted from posted results.")

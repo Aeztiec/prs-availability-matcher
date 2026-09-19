@@ -119,6 +119,44 @@ CREATE TABLE IF NOT EXISTS ref_boards (
 );
 
 
+-- A finished game, written when /result is submitted and replaced if it is
+-- submitted again for the same game. Everything below hangs off it: suspensions
+-- are worked out from the cards, and the referee leaderboard from the officials.
+CREATE TABLE IF NOT EXISTS results (
+    fixture_id  INTEGER PRIMARY KEY REFERENCES fixtures(id) ON DELETE CASCADE,
+    home_score  INTEGER NOT NULL,
+    away_score  INTEGER NOT NULL,
+    home_pens   INTEGER,
+    away_pens   INTEGER,
+    posted_by   INTEGER,
+    posted_at   TEXT    NOT NULL
+);
+
+-- Everyone listed in a result's stats, starters and bench, with their totals.
+-- Being listed means they played, which is what a suspension is checked against.
+CREATE TABLE IF NOT EXISTS result_players (
+    fixture_id  INTEGER NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
+    username    TEXT    NOT NULL,
+    club        TEXT    NOT NULL,
+    starter     INTEGER NOT NULL DEFAULT 1,
+    goals       INTEGER NOT NULL DEFAULT 0,
+    assists     INTEGER NOT NULL DEFAULT 0,
+    yellows     INTEGER NOT NULL DEFAULT 0,
+    reds        INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (fixture_id, username)
+);
+
+-- The officiating team as typed on the result. referee_id is filled in when the
+-- name matches a registered referee, so their games add up under one person.
+CREATE TABLE IF NOT EXISTS result_officials (
+    fixture_id  INTEGER NOT NULL REFERENCES fixtures(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    name        TEXT    NOT NULL,
+    role        TEXT,
+    referee_id  INTEGER,
+    PRIMARY KEY (fixture_id, position)
+);
+
 CREATE INDEX IF NOT EXISTS ix_fixtures_week   ON fixtures(week, competition);
 CREATE INDEX IF NOT EXISTS ix_fixtures_status ON fixtures(status);
 CREATE INDEX IF NOT EXISTS ix_log_fixture     ON log(fixture_id, id);
@@ -636,3 +674,71 @@ class Store:
         with self._connect() as conn:
             return {r["team"]: r["discord_id"]
                     for r in conn.execute("SELECT team, discord_id FROM managers")}
+
+    # ------------------------------------------------------------- results
+    def save_result(self, fixture_id, home_score, away_score, pens, posted_by,
+                    players, officials):
+        """Store (or replace) a game's result.
+
+        players: dicts with username, club, starter, goals, assists, yellows, reds.
+        officials: dicts with name, role (REF / AR / None) and referee_id (or None).
+        """
+        with self._connect() as conn:
+            for table in ("result_players", "result_officials", "results"):
+                conn.execute("DELETE FROM {} WHERE fixture_id=?".format(table), (fixture_id,))
+            conn.execute(
+                """INSERT INTO results (fixture_id, home_score, away_score, home_pens,
+                                        away_pens, posted_by, posted_at)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (fixture_id, home_score, away_score,
+                 pens[0] if pens else None, pens[1] if pens else None, posted_by, now()),
+            )
+            conn.executemany(
+                """INSERT INTO result_players (fixture_id, username, club, starter, goals,
+                                               assists, yellows, reds)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                [(fixture_id, p["username"], p["club"], 1 if p["starter"] else 0,
+                  p["goals"], p["assists"], p["yellows"], p["reds"]) for p in players],
+            )
+            conn.executemany(
+                """INSERT INTO result_officials (fixture_id, position, name, role, referee_id)
+                   VALUES (?,?,?,?,?)""",
+                [(fixture_id, i, o["name"], o["role"], o["referee_id"])
+                 for i, o in enumerate(officials)],
+            )
+        self.note(fixture_id, "result posted", "{}-{}".format(home_score, away_score))
+
+    def result(self, fixture_id):
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM results WHERE fixture_id=?", (fixture_id,)).fetchone()
+        return dict(row) if row else None
+
+    def resulted_fixture_ids(self):
+        with self._connect() as conn:
+            return {r["fixture_id"] for r in conn.execute("SELECT fixture_id FROM results")}
+
+    def result_players(self, club=None):
+        """Every stored player line, optionally only for one club."""
+        sql = "SELECT * FROM result_players"
+        args = ()
+        if club is not None:
+            sql += " WHERE club=?"
+            args = (club,)
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute(sql, args)]
+
+    def referee_leaderboard(self):
+        """Games officiated per person, most first. A registered referee is one
+        row however their name was typed; anyone else is grouped by name."""
+        sql = """
+            SELECT COALESCE('id:' || referee_id, 'name:' || lower(name)) AS person,
+                   MAX(referee_id) AS referee_id,
+                   MAX(name) AS name,
+                   COUNT(DISTINCT fixture_id) AS games,
+                   COUNT(DISTINCT CASE WHEN role='REF' THEN fixture_id END) AS as_referee,
+                   COUNT(DISTINCT CASE WHEN role='AR' THEN fixture_id END) AS as_assistant
+            FROM result_officials
+            GROUP BY person
+            ORDER BY games DESC, as_referee DESC, lower(name)"""
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute(sql)]

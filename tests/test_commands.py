@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import tempfile
+import types
 
 from discord import app_commands
 
@@ -23,9 +24,10 @@ from bot.client import PRSBot
 from bot.commands import register
 from bot.commands.results import RESULT_GUIDE, STARTERS, ResultForm
 from bot.db import Store
-from bot.domain import season
+from bot.domain import discipline, season
 from bot.domain.players import Players
 from bot.domain.scheduling import Status
+from bot.ui import notify
 
 FAILURES = []
 
@@ -139,6 +141,102 @@ check("officials are pre-filled with the referee first",
       crew[0], "moh1d - Main Referee [Full 90']")
 check("a Discord name that matches the sheet uses the sheet's spelling",
       crew[1], "citizen0 - Assistant Referee [Full 90']")
+
+print("\nsubmitting a result: it is stored, and the next game's referee is told")
+sent = []
+
+
+async def fake_post(channel, content=None, view=None, mention_users=True, embed=None):
+    sent.append((content, embed.description if embed else None))
+    return object()
+
+
+async def fake_channel(week):
+    return object()
+
+
+bot.post = fake_post
+bot.officials_channel = fake_channel
+
+
+class Response:
+    def __init__(self):
+        self.messages = []
+        self.deferred = False
+
+    async def send_message(self, *args, **kwargs):
+        self.messages.append((args, kwargs))
+
+    async def defer(self, **kwargs):
+        self.deferred = True
+
+    def is_done(self):
+        return self.deferred or bool(self.messages)
+
+
+class Followup:
+    def __init__(self):
+        self.messages = []
+
+    async def send(self, *args, **kwargs):
+        self.messages.append((args, kwargs))
+
+
+def submit(target, home_text, away_text="", officials_text=""):
+    form = ResultForm(bot, players, target, 2, 1, None)
+    form.home._value, form.away._value = home_text, away_text
+    form.motm._value, form.officials._value = "", officials_text
+    interaction = types.SimpleNamespace(
+        response=Response(), followup=Followup(), channel=object(),
+        user=types.SimpleNamespace(id=99))
+    asyncio.run(form.on_submit(interaction))
+    return interaction
+
+
+second = bot.store.create_fixture(
+    bot.timings.competition.key, "2026-09-26", "ARSENAL", "MANCHESTER CITY", 1, 2,
+    "2026-09-23T23:00:00Z", Status.SCHEDULED, gameweek="GW2", league="PL")
+bot.store.set_schedule(second, slot.key, "MANUAL", Status.SCHEDULED)
+bot.store.claim_referee(second, 12, "REF")
+
+done = submit(fixture, "gunner0 rc\ngunner1 g g", "citizen0",
+              "moh1d - Main Referee [Full 90']\ncitizen0 - Assistant Referee [Full 90']")
+check("the result is saved", bot.store.result(fixture["id"])["home_score"], 2)
+check("the players and their cards are saved",
+      sorted((p["username"], p["reds"], p["goals"]) for p in bot.store.result_players("ARSENAL")),
+      [("gunner0", 1, 0), ("gunner1", 0, 2)])
+check("the result was posted, then the referee was told",
+      [content for content, _ in sent], [None, "<@12>"])
+check("the notice names the player and why",
+      "gunner0" in sent[-1][1] and "red card in GW1" in sent[-1][1], True)
+report = done.followup.messages[0][0][0]
+check("staff see who is suspended and that the officials were told",
+      "Suspended for their next game" in report and "have been told" in report, True)
+check("the next game's suspension is on record",
+      [x["username"] for x in discipline.suspended_for(bot.store, bot.store.fixture(second))],
+      ["gunner0"])
+
+asyncio.run(bot.announce_suspensions(bot.store.fixture(second), [12]))
+check("a referee who claims that game is pinged as well", sent[-1][0], "<@12>")
+sent.clear()
+asyncio.run(bot.announce_suspensions(bot.store.fixture(fixture["id"]), [11]))
+check("a game with nobody suspended posts nothing", sent, [])
+
+served = submit(bot.store.fixture(second), "gunner0 g\ngunner1", "citizen0")
+check("listing the suspended player is flagged to staff",
+      "Played while suspended" in served.followup.messages[0][0][0], True)
+
+print("\nthe referee leaderboard")
+rows = bot.store.referee_leaderboard()
+check("games count per person, however the name was typed",
+      [(r["name"], r["games"], r["as_referee"], r["as_assistant"]) for r in rows],
+      [("moh1d", 1, 1, 0), ("citizen0", 1, 0, 1)])
+board = notify.referee_leaderboard(rows, {11: "moh1d", 12: "citizen0"})
+check("tied referees share first place",
+      board.description.splitlines()[0], "\U0001F947 **moh1d** - 1 game (1 as referee)")
+check("and the assistant is counted too",
+      board.description.splitlines()[1], "\U0001F947 **citizen0** - 1 game (1 as assistant)")
+check("no games yet says so", "No games counted" in notify.referee_leaderboard([]).description, True)
 
 print("")
 if FAILURES:

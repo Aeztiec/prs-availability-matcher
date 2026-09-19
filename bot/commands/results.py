@@ -9,9 +9,10 @@ from discord import app_commands
 
 from bot.commands.checks import staff_only
 from bot.commands.picker import game_picker
-from bot.domain import referees, season
+from bot.domain import discipline, referees, season
 from bot.domain.players import Players
 from bot.ui import notify, results
+from bot.ui.ref_views import matchup
 from bot.ui.render import to_discord_embed
 
 log = logging.getLogger("prsbot")
@@ -54,6 +55,60 @@ def roblox_name(players, row):
         return row["roblox"]
     match = players.find(row["name"])
     return match["username"] if match else row["name"]
+
+
+def registered_referees(store):
+    """{lowercase name: discord id} for every registered referee, by Roblox
+    name and by Discord name, so a result's officials add up under one person."""
+    known = {}
+    for row in store.referees(active_only=False):
+        for name in (row.get("roblox"), row["name"]):
+            if name:
+                known.setdefault(name.lower(), row["discord_id"])
+    return known
+
+
+async def suspension_follow_up(bot, fixture):
+    """After a result is stored: tell the next game's referees who is suspended
+    for it, and return the lines staff should see.
+
+    The suspensions are worked out from every stored result, not just this one,
+    so what the referees are told is always the full list for that game.
+    """
+    store = bot.store
+    group = discipline.competition_group(fixture.get("league"))
+    fixtures = {f["id"]: f for f in store.fixtures()}
+    lines = []
+
+    by_next = {}
+    for club in (fixture["home_team"], fixture["away_team"]):
+        following = discipline.next_game(store, club, fixture)
+        for username, standing in discipline.standings(store, club, group).items():
+            if fixture["id"] in standing.triggers and (standing.game or standing.carries):
+                by_next.setdefault(following["id"] if following else None, []).append(
+                    {"username": username, "club": club, "standing": standing})
+
+    for next_id, items in by_next.items():
+        lines.append("**Suspended for their next game**")
+        lines += notify.suspension_rows(items, fixtures)
+        if next_id is None:
+            lines.append("-# Their club has no next game in the calendar yet.")
+            continue
+        upcoming = fixtures[next_id]
+        crew = [r["referee_id"] for r in store.fixture_referees(next_id)]
+        if crew:
+            await bot.announce_suspensions(upcoming, crew)
+            lines.append("-# The officials of {} have been told.".format(
+                matchup(upcoming)))
+        else:
+            lines.append("-# No referee has claimed {} yet. Whoever does will be told.".format(
+                matchup(upcoming)))
+
+    breaches = discipline.breaches(store, fixture)
+    if breaches:
+        lines.append("**Played while suspended**")
+        lines += ["{} | {}".format(season.label_for(b["club"]), b["username"]) for b in breaches]
+    return lines
 
 
 class ResultForm(discord.ui.Modal):
@@ -99,7 +154,7 @@ class ResultForm(discord.ui.Modal):
         return item
 
     async def on_submit(self, interaction):
-        text, problems = results.build(
+        text, problems, data = results.build_full(
             self.fixture, self.scores[0], self.scores[1], self.home.value,
             self.away.value, self.motm.value, self.officials.value, self.players,
             pens=self.pens)
@@ -111,13 +166,23 @@ class ResultForm(discord.ui.Modal):
                     footer="Nothing was posted. Run /result again.")),
                 ephemeral=True)
             return
+        # Stored first: the suspensions and the referee leaderboard are worked
+        # out from what is saved, and a corrected result replaces the old one.
+        known = registered_referees(self.bot.store)
+        officials = [dict(o, referee_id=known.get(o["name"].lower())) for o in data["officials"]]
+        self.bot.store.save_result(
+            self.fixture["id"], self.scores[0], self.scores[1], self.pens,
+            interaction.user.id, data["players"], officials)
+
         posted = await self.bot.post(
             interaction.channel,
             embed=to_discord_embed(notify.BoardEmbed(description=text)),
             mention_users=False)
-        await interaction.response.send_message(
-            "Result posted." if posted else
-            "⚠️ Couldn't post here. Check my permissions.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        lines = ["Result posted." if posted else
+                 "⚠️ Couldn't post here. Check my permissions. The result is saved."]
+        lines += await suspension_follow_up(self.bot, self.fixture)
+        await interaction.followup.send(chr(10).join(lines), ephemeral=True)
 
     async def on_error(self, interaction, error):
         log.error("result form failed", exc_info=error)

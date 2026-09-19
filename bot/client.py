@@ -10,7 +10,7 @@ from discord.ext import tasks
 
 from bot import config
 from bot.ui import notify
-from bot.domain import referees, season
+from bot.domain import discipline, referees, season
 from bot.db import Store
 from bot.ui.ref_views import REF_DYNAMIC_ITEMS, ClaimSelect, claim_options
 from bot.domain.fallback import Timings
@@ -164,6 +164,31 @@ class PRSBot(discord.Client):
         except (discord.Forbidden, discord.HTTPException) as error:
             log.warning("could not post in %s: %s", getattr(channel, "id", "?"), error)
             return None
+
+    async def officials_channel(self, week):
+        """Where referees will see it: their board's channel, else the fixture
+        board's."""
+        record = self.store.ref_board(week)
+        if record:
+            try:
+                return self.get_channel(record["channel_id"]) or                     await self.fetch_channel(record["channel_id"])
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
+                log.warning("referee board channel for %s unreachable: %s", week, error)
+        return await self.channel_for(week)
+
+    async def announce_suspensions(self, fixture, mention_ids):
+        """Tell a game's officials who is suspended for it, by pinging them in
+        their channel. Returns True if anything was posted; a game with nobody
+        suspended, or nobody to tell, posts nothing."""
+        items = discipline.suspended_for(self.store, fixture)
+        mention_ids = list(dict.fromkeys(mention_ids))
+        if not items or not mention_ids:
+            return False
+        fixtures = {f["id"]: f for f in self.store.fixtures()}
+        embed = notify.suspension_notice(fixture, items, fixtures)
+        content = " ".join("<@{}>".format(i) for i in mention_ids)
+        channel = await self.officials_channel(fixture["week"])
+        return bool(await self.post(channel, content, embed=to_discord_embed(embed)))
 
     async def on_availability_submitted(self, week):
         """Called by the submit button with the week just submitted for.

@@ -13,7 +13,13 @@ board, and posts results.
 - **Officiating.** Referees claim games from a menu (first come, first served:
   one referee and up to two assistants), and can drop out again.
 - **Results.** `/result` opens a form and posts a finished game in the league's
-  results format.
+  results format. Every result is saved: it drives suspensions and the referee
+  leaderboard.
+- **Suspensions.** A red card, a second yellow in one game, or yellows in two
+  consecutive games mean the player misses their club's next game in the same
+  competition (domestic or UEFA, kept separate). The referees of that game are
+  pinged with who is suspended, both when the result is posted and when someone
+  claims or is assigned the game.
 
 ## Commands
 
@@ -22,9 +28,9 @@ board, and posts results.
 | `/availability` | Managers | Set your timings for the week |
 | `/ref dropout` | Referees | Drop out of a game you are officiating |
 | `/gw list` `open` `close` | Staff | The calendar; open a gameweek (creates its fixtures and posts the announcement); close it |
-| `/fixture list` `show` `set` `board` | Staff | Scheduling status, one game's log, set a kickoff by hand, publish the fixture board |
+| `/fixture list` `show` `set` `board` `suspensions` | Staff | Scheduling status, one game's log (with its suspended players), set a kickoff by hand, publish the fixture board, list current suspensions |
 | `/managers set` `list` | Staff | Say who manages a team; see every team and its manager |
-| `/refs register` `tier` `list` `assign` `board` | Staff | Register referees (with a Roblox name and tier), assign one by hand, publish the referee board |
+| `/refs register` `tier` `list` `assign` `board` `leaderboard` | Staff | Register referees (with a Roblox name and tier), assign one by hand, publish the referee board, see games officiated per referee |
 | `/result` | Staff | Post a finished game's result |
 | `/test managers` `referees` `schedule` | Staff | Fake activity to exercise the whole flow |
 
@@ -75,6 +81,15 @@ tests/                   python -m tests
 
 Everything under `bot/domain` and the builders in `bot/ui` work on plain data,
 so they are tested without a Discord connection.
+
+### Suspensions and the leaderboard
+
+Both are worked out from the saved results, never stored separately, so
+submitting `/result` again for a game corrects everything that came from it.
+The rules are in `bot/domain/discipline.py`. The leaderboard counts each game a
+person is listed in on a result's officiating team, as referee or assistant;
+a name that matches a registered referee (by Roblox or Discord name) adds up
+under that referee.
 
 ### The timings sheet
 

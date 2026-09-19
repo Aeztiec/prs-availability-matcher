@@ -9,6 +9,7 @@ from discord import app_commands
 
 from bot.ui import notify
 from bot.ui.ref_views import matchup
+from bot.domain import discipline
 from bot.domain.scheduling import Status
 
 from bot.commands.checks import staff_only
@@ -41,14 +42,28 @@ def setup(bot):
         record = await resolve_game(interaction, game)
         if record is None:
             return
+        fixtures = {f["id"]: f for f in store.fixtures()}
+        suspended = notify.suspension_rows(discipline.suspended_for(store, record), fixtures)
         await interaction.response.send_message(
             embed=to_discord_embed(notify.fixture_detail(
                 record, store.history(record["id"]),
-                bot.slot(record["slot_key"]), store.fixture_referees(record["id"]))),
+                bot.slot(record["slot_key"]), store.fixture_referees(record["id"]),
+                suspended=suspended)),
             ephemeral=True,
         )
 
     fixture_show.autocomplete("game")(game_autocomplete())
+
+    @fixture_group.command(name="suspensions",
+                           description="Players suspended for a game still to come")
+    @staff_only()
+    async def fixture_suspensions(interaction):
+        fixtures = {f["id"]: f for f in store.fixtures()}
+        await interaction.response.send_message(
+            embed=to_discord_embed(notify.suspension_list(
+                discipline.current(store), fixtures, fixtures.get)),
+            ephemeral=True,
+        )
 
     @fixture_group.command(name="set", description="Set a kickoff time by hand")
     @app_commands.describe(
