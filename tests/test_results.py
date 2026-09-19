@@ -5,11 +5,14 @@ Run with:  python -m tests.test_results
 
 from __future__ import annotations
 
+import re
 import sys
 
 from bot.domain import season
 from bot.domain.players import Players
-from bot.ui.results import build, build_full, header, parse_line, parse_official, score_line
+from bot.ui.results import (
+    STAT_EMOJI as E, build, build_full, header, parse_line, parse_official, score_line, show_keys,
+)
 
 FAILURES = []
 
@@ -97,13 +100,28 @@ stats = text.split("**STATISTICS:**")[1]
 check("statistics heading is bold", "**STATISTICS:**" in text, True)
 check("most goals first, then assists, ties keep typed order",
       [r.split(" | ")[1] for r in rows_of(text, "**STATISTICS:**")[:3]],
-      ["vzcadc ⚽ ⚽", "\\_gawa ⚽ 👁️ 🟨", "danielfly 👁️"])
+      ["vzcadc {0} {0}".format(E["goal"]), "\\_gawa {} {} {}".format(E["goal"], E["assist"], E["yellow"]),
+       "danielfly {}".format(E["assist"])])
 check("bench has its own bold heading under the starters",
-      rows_of(text, "**STATISTICS:**")[3:], ["**BENCH:**", "{} | benchguy 🔁 '70 ON".format(PORTO)])
+      rows_of(text, "**STATISTICS:**")[3:],
+      ["**BENCH:**", "{} | benchguy {} '70 ON".format(PORTO, E["sub"])])
 check("team 2 is its own block with no bench when there is none",
       text.split("\n\n")[3].splitlines()[0], "{} | FelipeF".format(PSG))
 check("underscore usernames are escaped, not italic", "\\_gawa" in text, True)
-check("red card shown", "om\\_ena 🟥" in text, True)
+check("red card shown", "om\\_ena {}".format(E["red"]) in text, True)
+
+print("\nthe server's emoji")
+check("every stat is a real custom emoji, except the assist eye still to come",
+      sorted(k for k, v in E.items() if not re.fullmatch(r"<:\w+:\d+>", v)), ["assist"])
+check("the second yellow in a game shows the split card",
+      show_keys(["yellow", "yellow"]), [E["yellow"], E["second_yellow"]])
+check("a lone yellow is the plain card", show_keys(["yellow"]), [E["yellow"]])
+check("own goal and injury are codes now",
+      (parse_line("x og")[1], parse_line("x inj")[1]), (["own_goal"], ["injury"]))
+check("shootout penalties use their own icons",
+      show_keys(parse_line("x ps pm")[1]), [E["pen_scored"], E["pen_missed"]])
+check("an own goal is not counted as a goal scored",
+      [r for r in build_full(FIXTURE, 1, 0, "vzcadc og", "", "", "", SHEET)[2]["players"]][0]["goals"], 0)
 check("mentions: badge, name, trophy then medals, optional note",
       rows_of(text, "**MOTM & MENTIONS:**"),
       ["{} | \\_gawa 🏆 - hat trick".format(PORTO), "{} | FelipeF 🥇".format(PSG)])

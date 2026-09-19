@@ -19,16 +19,20 @@ import re
 
 from bot.domain import season
 
-# What each token shows. Unicode for now; swap any of these for a custom emoji
-# (e.g. "<:RC:123...>") once it is uploaded to the server.
+# What each token shows: the server's own emoji, except the assist eye, which
+# has no upload yet. A second yellow in one game is shown with the split card
+# (see show_keys), and a substitution as the sub icon plus its minute.
 STAT_EMOJI = {
-    "goal": "⚽",
+    "goal": "<:goal:1550867024232583219>",
+    "own_goal": "<:own_goal:1550867051193565246>",
     "assist": "👁️",
-    "yellow": "🟨",
-    "red": "🟥",
-    "sub": "🔁",       # shown as "🔁 '75 ON" / "🔁 '75 OFF"; see parse_line
-    "pen_scored": "🟢",
-    "pen_missed": "🔴",
+    "yellow": "<:yellow_card:1550867287181893662>",
+    "second_yellow": "<:second_yellow:1550867191836975244>",
+    "red": "<:red_card:1550867225299259434>",
+    "sub": "<:sub:1550866968222113844>",      # shown as "<icon> '75 ON" / "<icon> '75 OFF"
+    "injury": "<:injury:1550866993731735602>",
+    "pen_scored": "<:penalty_goal:1550867259197620334>",
+    "pen_missed": "<:penalty_miss:1550867105556078602>",
 }
 
 TOKENS = {
@@ -37,10 +41,12 @@ TOKENS = {
     "yc": "yellow", "yellow": "yellow",
     "rc": "red", "red": "red",
     "ps": "pen_scored", "pm": "pen_missed",
+    "og": "own_goal", "owngoal": "own_goal",
+    "inj": "injury", "injury": "injury",
 }
 
-TOKEN_HELP = ("g goal, a assist, yc yellow, rc red, on75 / off75 subbed on or off at "
-              "75', ps scored pen, pm missed pen (g3 = three goals)")
+TOKEN_HELP = ("g goal, og own goal, a assist, yc yellow, rc red, on75 / off75 subbed on or "
+              "off at 75', inj injury, ps scored pen, pm missed pen (g3 = three goals)")
 SUB_HELP = ("A sub needs the minute and ON or OFF, like on75 or off60 "
             "(added time works too: on90+3).")
 
@@ -102,6 +108,19 @@ def show(key):
         _, direction, minute = key.split(":")
         return "{} '{} {}".format(STAT_EMOJI["sub"], minute, direction.upper())
     return STAT_EMOJI[key]
+
+
+def show_keys(keys):
+    """A player's stats as emoji, in the order typed. The second yellow in a
+    game shows as the split yellow/red card, since it is a sending off."""
+    shown, yellows = [], 0
+    for key in keys:
+        if key == "yellow":
+            yellows += 1
+            shown.append(STAT_EMOJI["second_yellow"] if yellows > 1 else STAT_EMOJI["yellow"])
+        else:
+            shown.append(show(key))
+    return shown
 
 
 def _row(team, text):
@@ -217,7 +236,7 @@ def build_full(fixture, home_score, away_score, stats_home, stats_away, motm,
                 rows.append(label)
             for name, keys in sorted(group, key=_stat_order):
                 rows.append(_row(club, " ".join(
-                    [esc(name)] + [show(k) for k in keys])))
+                    [esc(name)] + show_keys(keys))))
                 collected.append({
                     "username": name, "club": club, "starter": group is starters,
                     "goals": keys.count("goal"), "assists": keys.count("assist"),

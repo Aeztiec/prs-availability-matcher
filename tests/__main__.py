@@ -9,6 +9,7 @@ ROOT = os.path.dirname(HERE)
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     modules = sorted(f[:-3] for f in os.listdir(HERE)
                      if f.startswith("test_") and f.endswith(".py"))
     failed = []
