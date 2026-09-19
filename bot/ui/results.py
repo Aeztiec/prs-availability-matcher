@@ -47,6 +47,7 @@ SUB_HELP = ("A sub needs the minute and ON or OFF, like on75 or off60 "
 # MOTM gets the trophy, the next three mentions the medals, in the order typed.
 PLACINGS = ["🏆", "🥇", "🥈", "🥉"]
 MAX_MENTIONS = 10
+MAX_REPEAT = 20   # g3, a10: the most times one code can be repeated
 DESCRIPTION_LIMIT = 4000   # an embed description holds 4096
 
 _TOKEN = re.compile(r"^(\d*)([a-z]+)(\d*)$")
@@ -84,7 +85,7 @@ def parse_line(line):
         lead, word, trail = match.groups()
         key = TOKENS.get(word)
         count = int(lead or trail or 1)
-        if key is None or count > 9:
+        if key is None or count > MAX_REPEAT:
             bad.append(raw)
             continue
         keys.extend([key] * count)
