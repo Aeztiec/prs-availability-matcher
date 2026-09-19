@@ -21,19 +21,16 @@ STARTERS = 7
 
 RESULT_GUIDE = chr(10).join([
     "### Result form",
-    "One player per line, codes after the name: `vzcadc g g a`",
+    "One player per line, codes after the name: `OssieNomae g g a`",
     "",
-    "- `g` goal, `og` own goal, `a` assist",
-    "- `yc` yellow (twice is a second yellow), `rc` red",
-    "- `on75` / `off75` sub on / off (minute required)",
-    "- `inj` injury",
-    "- `ps` / `pm` shootout penalty scored / missed",
-    "- `g3` three goals",
+    "- `g` = goal, `og` = own goal, `a` = assist",
+    "- `yc` = yellow, `yc2` = second yellow, `rc` = red",
+    "- `on75` / `off75` = sub on / sub off (minute required)",
+    "- `ps` / `pm` = penalty scored / penalty missed",
+    "- `g3` = three goals, `a5` = five assists (works for any number)",
     "",
     "**Lineups:** pre-filled. Reorder to match who started, keep substitutes "
     "under `BENCH` and remove anyone who did not play.",
-    "",
-    "**MOTM:** best first (🏆 🥇 🥈 🥉). Optional note after a dash.",
 ])
 
 OFFICIAL_ROLE = {referees.ROLE_REF: "Main Referee", referees.ROLE_AR: "Assistant Referee"}
