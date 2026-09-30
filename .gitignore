@@ -1,0 +1,8 @@
+# Note: timings/*.html are NOT ignored - they are the source of truth for
+# which competitions exist, and the Action rebuilds docs/data.js from them.
+
+__pycache__/
+*.pyc
+
+# This session's local preview config, not part of the site
+.claude/
